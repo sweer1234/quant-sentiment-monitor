@@ -1,0 +1,39 @@
+version: 1
+last_updated: "2026-02-26"
+description: "Rules used to compute effective source weight and final event importance."
+
+effective_source_weight:
+  formula: "0.35*source_weight + 0.30*credibility_weight + 0.20*timeliness_weight + 0.15*coverage_weight - 0.20*noise_penalty"
+  clamp: [0.0, 1.0]
+
+category_multipliers:
+  central_bank: 1.10
+  regulator: 1.08
+  statistics: 1.05
+  exchange: 1.03
+  policy: 1.00
+  fixed_income: 1.00
+  media: 0.95
+
+tier_multipliers:
+  "0": 1.10
+  "1": 1.00
+  "2": 0.85
+
+freshness_decay:
+  half_life_minutes: 90
+  max_age_minutes: 1440
+
+importance_score:
+  formula: "100*(0.32*effective_source_weight + 0.25*event_severity + 0.18*surprise_degree + 0.15*cross_market_span + 0.10*market_confirmation)"
+  level_thresholds:
+    p0: 85
+    p1: 70
+    p2: 0
+
+impact_score:
+  formula: "100*(0.30*effective_source_weight + 0.25*asset_relevance + 0.20*event_severity + 0.15*surprise_degree + 0.10*market_confirmation)"
+  trigger_thresholds:
+    alert_p0: 85
+    alert_p1: 70
+    trading_signal: 75

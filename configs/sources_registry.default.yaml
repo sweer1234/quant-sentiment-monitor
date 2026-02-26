@@ -1,0 +1,1106 @@
+version: 1
+last_updated: "2026-02-26"
+description: "Built-in global key financial source registry."
+
+default_settings:
+  enabled: true
+  crawl_mode: rss
+  poll_interval_sec: 120
+  source_weight: 0.70
+  credibility_weight: 0.75
+  timeliness_weight: 0.70
+  coverage_weight: 0.65
+  noise_penalty: 0.10
+
+weight_bounds:
+  min: 0.0
+  max: 1.0
+
+sources:
+  - source_id: pbc
+    display_name: "People's Bank of China"
+    region: CN
+    category: central_bank
+    tier: 0
+    url: "https://www.pbc.gov.cn/"
+    crawl_mode: web
+    poll_interval_sec: 20
+    source_weight: 0.98
+    credibility_weight: 0.99
+    timeliness_weight: 0.92
+    coverage_weight: 0.90
+    noise_penalty: 0.02
+    tags: [policy, rates, liquidity]
+    asset_focus: [fx, bond, equity_index, metals]
+
+  - source_id: nfra
+    display_name: "National Financial Regulatory Administration"
+    region: CN
+    category: regulator
+    tier: 0
+    url: "https://www.nfra.gov.cn/"
+    crawl_mode: web
+    poll_interval_sec: 30
+    source_weight: 0.95
+    credibility_weight: 0.98
+    timeliness_weight: 0.86
+    coverage_weight: 0.84
+    noise_penalty: 0.03
+    tags: [regulation, banking, insurance]
+    asset_focus: [equity, bond, derivatives]
+
+  - source_id: csrc
+    display_name: "China Securities Regulatory Commission"
+    region: CN
+    category: regulator
+    tier: 0
+    url: "http://www.csrc.gov.cn/"
+    crawl_mode: web
+    poll_interval_sec: 30
+    source_weight: 0.97
+    credibility_weight: 0.98
+    timeliness_weight: 0.88
+    coverage_weight: 0.88
+    noise_penalty: 0.03
+    tags: [regulation, listing, capital_market]
+    asset_focus: [equity, futures, options]
+
+  - source_id: safe_cn
+    display_name: "State Administration of Foreign Exchange"
+    region: CN
+    category: regulator
+    tier: 0
+    url: "http://www.safe.gov.cn/"
+    crawl_mode: web
+    poll_interval_sec: 30
+    source_weight: 0.95
+    credibility_weight: 0.98
+    timeliness_weight: 0.85
+    coverage_weight: 0.86
+    noise_penalty: 0.03
+    tags: [fx, balance_of_payments]
+    asset_focus: [fx, bond]
+
+  - source_id: mof_cn
+    display_name: "Ministry of Finance of China"
+    region: CN
+    category: policy
+    tier: 0
+    url: "https://www.mof.gov.cn/"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.92
+    credibility_weight: 0.97
+    timeliness_weight: 0.82
+    coverage_weight: 0.86
+    noise_penalty: 0.04
+    tags: [fiscal, debt, budget]
+    asset_focus: [bond, equity_index]
+
+  - source_id: stats_cn
+    display_name: "National Bureau of Statistics of China"
+    region: CN
+    category: statistics
+    tier: 0
+    url: "http://www.stats.gov.cn/"
+    crawl_mode: web
+    poll_interval_sec: 30
+    source_weight: 0.97
+    credibility_weight: 0.98
+    timeliness_weight: 0.84
+    coverage_weight: 0.92
+    noise_penalty: 0.02
+    tags: [macro, cpi, ppi, gdp]
+    asset_focus: [fx, bond, equity_index, commodities]
+
+  - source_id: ndrc_cn
+    display_name: "National Development and Reform Commission"
+    region: CN
+    category: policy
+    tier: 0
+    url: "https://www.ndrc.gov.cn/"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.90
+    credibility_weight: 0.95
+    timeliness_weight: 0.80
+    coverage_weight: 0.86
+    noise_penalty: 0.04
+    tags: [industry, energy, infrastructure]
+    asset_focus: [commodities, equity, futures]
+
+  - source_id: gacc_cn
+    display_name: "General Administration of Customs of China"
+    region: CN
+    category: statistics
+    tier: 0
+    url: "http://www.customs.gov.cn/"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.88
+    credibility_weight: 0.94
+    timeliness_weight: 0.78
+    coverage_weight: 0.83
+    noise_penalty: 0.05
+    tags: [trade, import, export]
+    asset_focus: [fx, commodities, equity_index]
+
+  - source_id: cfets
+    display_name: "China Foreign Exchange Trade System"
+    region: CN
+    category: exchange
+    tier: 0
+    url: "https://www.chinamoney.com.cn/"
+    crawl_mode: web
+    poll_interval_sec: 20
+    source_weight: 0.96
+    credibility_weight: 0.97
+    timeliness_weight: 0.90
+    coverage_weight: 0.85
+    noise_penalty: 0.03
+    tags: [fx, interbank, rates]
+    asset_focus: [fx, bond, derivatives]
+
+  - source_id: shibor
+    display_name: "Shanghai Interbank Offered Rate"
+    region: CN
+    category: statistics
+    tier: 0
+    url: "https://www.shibor.org/"
+    crawl_mode: web
+    poll_interval_sec: 30
+    source_weight: 0.90
+    credibility_weight: 0.95
+    timeliness_weight: 0.83
+    coverage_weight: 0.80
+    noise_penalty: 0.03
+    tags: [rates, money_market]
+    asset_focus: [bond, fx]
+
+  - source_id: sse
+    display_name: "Shanghai Stock Exchange"
+    region: CN
+    category: exchange
+    tier: 0
+    url: "http://www.sse.com.cn/"
+    crawl_mode: web
+    poll_interval_sec: 15
+    source_weight: 0.97
+    credibility_weight: 0.98
+    timeliness_weight: 0.89
+    coverage_weight: 0.90
+    noise_penalty: 0.02
+    tags: [listing, disclosure, trading_rules]
+    asset_focus: [equity, bond, options]
+
+  - source_id: szse
+    display_name: "Shenzhen Stock Exchange"
+    region: CN
+    category: exchange
+    tier: 0
+    url: "http://www.szse.cn/"
+    crawl_mode: web
+    poll_interval_sec: 15
+    source_weight: 0.97
+    credibility_weight: 0.98
+    timeliness_weight: 0.89
+    coverage_weight: 0.89
+    noise_penalty: 0.02
+    tags: [listing, disclosure, trading_rules]
+    asset_focus: [equity, options]
+
+  - source_id: bse_cn
+    display_name: "Beijing Stock Exchange"
+    region: CN
+    category: exchange
+    tier: 0
+    url: "https://www.bse.cn/"
+    crawl_mode: web
+    poll_interval_sec: 20
+    source_weight: 0.92
+    credibility_weight: 0.95
+    timeliness_weight: 0.84
+    coverage_weight: 0.80
+    noise_penalty: 0.03
+    tags: [listing, small_caps]
+    asset_focus: [equity]
+
+  - source_id: cffex
+    display_name: "China Financial Futures Exchange"
+    region: CN
+    category: exchange
+    tier: 0
+    url: "http://www.cffex.com.cn/"
+    crawl_mode: web
+    poll_interval_sec: 15
+    source_weight: 0.96
+    credibility_weight: 0.97
+    timeliness_weight: 0.90
+    coverage_weight: 0.86
+    noise_penalty: 0.03
+    tags: [index_futures, treasury_futures]
+    asset_focus: [futures, bond, equity_index]
+
+  - source_id: shfe
+    display_name: "Shanghai Futures Exchange"
+    region: CN
+    category: exchange
+    tier: 0
+    url: "https://www.shfe.com.cn/"
+    crawl_mode: web
+    poll_interval_sec: 15
+    source_weight: 0.96
+    credibility_weight: 0.97
+    timeliness_weight: 0.90
+    coverage_weight: 0.88
+    noise_penalty: 0.03
+    tags: [metals, energy, futures]
+    asset_focus: [futures, metals, commodities]
+
+  - source_id: dce
+    display_name: "Dalian Commodity Exchange"
+    region: CN
+    category: exchange
+    tier: 0
+    url: "http://www.dce.com.cn/"
+    crawl_mode: web
+    poll_interval_sec: 20
+    source_weight: 0.93
+    credibility_weight: 0.95
+    timeliness_weight: 0.86
+    coverage_weight: 0.84
+    noise_penalty: 0.03
+    tags: [agri, industrial, futures]
+    asset_focus: [futures, commodities]
+
+  - source_id: czce
+    display_name: "Zhengzhou Commodity Exchange"
+    region: CN
+    category: exchange
+    tier: 0
+    url: "http://www.czce.com.cn/"
+    crawl_mode: web
+    poll_interval_sec: 20
+    source_weight: 0.93
+    credibility_weight: 0.95
+    timeliness_weight: 0.86
+    coverage_weight: 0.84
+    noise_penalty: 0.03
+    tags: [agri, commodity, futures]
+    asset_focus: [futures, commodities]
+
+  - source_id: ine
+    display_name: "Shanghai International Energy Exchange"
+    region: CN
+    category: exchange
+    tier: 0
+    url: "https://www.ine.cn/"
+    crawl_mode: web
+    poll_interval_sec: 15
+    source_weight: 0.95
+    credibility_weight: 0.96
+    timeliness_weight: 0.89
+    coverage_weight: 0.83
+    noise_penalty: 0.03
+    tags: [energy, crude_oil, futures]
+    asset_focus: [futures, commodities, fx]
+
+  - source_id: gfex
+    display_name: "Guangzhou Futures Exchange"
+    region: CN
+    category: exchange
+    tier: 0
+    url: "http://www.gfex.com.cn/"
+    crawl_mode: web
+    poll_interval_sec: 20
+    source_weight: 0.90
+    credibility_weight: 0.94
+    timeliness_weight: 0.82
+    coverage_weight: 0.78
+    noise_penalty: 0.04
+    tags: [futures, green_finance]
+    asset_focus: [futures, commodities]
+
+  - source_id: chinabond
+    display_name: "ChinaBond"
+    region: CN
+    category: fixed_income
+    tier: 0
+    url: "https://www.chinabond.com.cn/"
+    crawl_mode: web
+    poll_interval_sec: 30
+    source_weight: 0.93
+    credibility_weight: 0.95
+    timeliness_weight: 0.82
+    coverage_weight: 0.88
+    noise_penalty: 0.03
+    tags: [bond, yield_curve, issuance]
+    asset_focus: [bond, derivatives]
+
+  - source_id: ccdc_cn
+    display_name: "China Central Depository and Clearing"
+    region: CN
+    category: fixed_income
+    tier: 0
+    url: "https://www.chinabond.com.cn/xxpl/ywzc_fxyfxdh/"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.88
+    credibility_weight: 0.93
+    timeliness_weight: 0.78
+    coverage_weight: 0.80
+    noise_penalty: 0.04
+    tags: [bond, clearing, custody]
+    asset_focus: [bond]
+
+  - source_id: sse_bond
+    display_name: "SSE Bond Market"
+    region: CN
+    category: fixed_income
+    tier: 0
+    url: "http://bond.sse.com.cn/"
+    crawl_mode: web
+    poll_interval_sec: 30
+    source_weight: 0.90
+    credibility_weight: 0.94
+    timeliness_weight: 0.82
+    coverage_weight: 0.84
+    noise_penalty: 0.03
+    tags: [bond, disclosure]
+    asset_focus: [bond]
+
+  - source_id: federal_reserve
+    display_name: "Federal Reserve"
+    region: US
+    category: central_bank
+    tier: 0
+    url: "https://www.federalreserve.gov/"
+    crawl_mode: rss
+    poll_interval_sec: 15
+    source_weight: 0.99
+    credibility_weight: 0.99
+    timeliness_weight: 0.95
+    coverage_weight: 0.92
+    noise_penalty: 0.01
+    tags: [fomc, rates, policy]
+    asset_focus: [fx, bond, equity_index, metals]
+
+  - source_id: us_treasury
+    display_name: "US Department of the Treasury"
+    region: US
+    category: policy
+    tier: 0
+    url: "https://home.treasury.gov/"
+    crawl_mode: rss
+    poll_interval_sec: 30
+    source_weight: 0.95
+    credibility_weight: 0.98
+    timeliness_weight: 0.87
+    coverage_weight: 0.88
+    noise_penalty: 0.02
+    tags: [issuance, sanctions, debt]
+    asset_focus: [bond, fx, derivatives]
+
+  - source_id: us_bls
+    display_name: "US Bureau of Labor Statistics"
+    region: US
+    category: statistics
+    tier: 0
+    url: "https://www.bls.gov/"
+    crawl_mode: rss
+    poll_interval_sec: 15
+    source_weight: 0.97
+    credibility_weight: 0.99
+    timeliness_weight: 0.90
+    coverage_weight: 0.91
+    noise_penalty: 0.02
+    tags: [nfp, inflation, employment]
+    asset_focus: [fx, bond, equity_index, futures]
+
+  - source_id: us_bea
+    display_name: "US Bureau of Economic Analysis"
+    region: US
+    category: statistics
+    tier: 0
+    url: "https://www.bea.gov/"
+    crawl_mode: rss
+    poll_interval_sec: 30
+    source_weight: 0.94
+    credibility_weight: 0.98
+    timeliness_weight: 0.84
+    coverage_weight: 0.88
+    noise_penalty: 0.02
+    tags: [gdp, pce, income]
+    asset_focus: [fx, bond, equity_index]
+
+  - source_id: sec
+    display_name: "US Securities and Exchange Commission"
+    region: US
+    category: regulator
+    tier: 0
+    url: "https://www.sec.gov/"
+    crawl_mode: rss
+    poll_interval_sec: 20
+    source_weight: 0.96
+    credibility_weight: 0.98
+    timeliness_weight: 0.87
+    coverage_weight: 0.90
+    noise_penalty: 0.02
+    tags: [filings, enforcement, disclosure]
+    asset_focus: [equity, options, derivatives]
+
+  - source_id: cftc
+    display_name: "US Commodity Futures Trading Commission"
+    region: US
+    category: regulator
+    tier: 0
+    url: "https://www.cftc.gov/"
+    crawl_mode: rss
+    poll_interval_sec: 30
+    source_weight: 0.95
+    credibility_weight: 0.97
+    timeliness_weight: 0.85
+    coverage_weight: 0.88
+    noise_penalty: 0.02
+    tags: [futures, derivatives, positioning]
+    asset_focus: [futures, options, commodities]
+
+  - source_id: finra
+    display_name: "Financial Industry Regulatory Authority"
+    region: US
+    category: regulator
+    tier: 0
+    url: "https://www.finra.org/"
+    crawl_mode: rss
+    poll_interval_sec: 60
+    source_weight: 0.88
+    credibility_weight: 0.93
+    timeliness_weight: 0.76
+    coverage_weight: 0.80
+    noise_penalty: 0.04
+    tags: [brokerage, compliance]
+    asset_focus: [equity, bond]
+
+  - source_id: ecb
+    display_name: "European Central Bank"
+    region: EU
+    category: central_bank
+    tier: 0
+    url: "https://www.ecb.europa.eu/"
+    crawl_mode: rss
+    poll_interval_sec: 15
+    source_weight: 0.98
+    credibility_weight: 0.99
+    timeliness_weight: 0.93
+    coverage_weight: 0.90
+    noise_penalty: 0.01
+    tags: [rates, policy, euro_area]
+    asset_focus: [fx, bond, equity_index]
+
+  - source_id: boe
+    display_name: "Bank of England"
+    region: UK
+    category: central_bank
+    tier: 0
+    url: "https://www.bankofengland.co.uk/"
+    crawl_mode: rss
+    poll_interval_sec: 15
+    source_weight: 0.97
+    credibility_weight: 0.99
+    timeliness_weight: 0.92
+    coverage_weight: 0.88
+    noise_penalty: 0.01
+    tags: [rates, policy, inflation]
+    asset_focus: [fx, bond, equity_index]
+
+  - source_id: boj
+    display_name: "Bank of Japan"
+    region: JP
+    category: central_bank
+    tier: 0
+    url: "https://www.boj.or.jp/"
+    crawl_mode: rss
+    poll_interval_sec: 15
+    source_weight: 0.97
+    credibility_weight: 0.99
+    timeliness_weight: 0.92
+    coverage_weight: 0.88
+    noise_penalty: 0.01
+    tags: [rates, ycc, policy]
+    asset_focus: [fx, bond, equity_index]
+
+  - source_id: snb
+    display_name: "Swiss National Bank"
+    region: CH
+    category: central_bank
+    tier: 0
+    url: "https://www.snb.ch/"
+    crawl_mode: web
+    poll_interval_sec: 30
+    source_weight: 0.93
+    credibility_weight: 0.97
+    timeliness_weight: 0.85
+    coverage_weight: 0.80
+    noise_penalty: 0.02
+    tags: [rates, fx, policy]
+    asset_focus: [fx, bond, metals]
+
+  - source_id: boc_canada
+    display_name: "Bank of Canada"
+    region: CA
+    category: central_bank
+    tier: 0
+    url: "https://www.bankofcanada.ca/"
+    crawl_mode: rss
+    poll_interval_sec: 20
+    source_weight: 0.95
+    credibility_weight: 0.98
+    timeliness_weight: 0.88
+    coverage_weight: 0.84
+    noise_penalty: 0.02
+    tags: [rates, inflation, policy]
+    asset_focus: [fx, bond, equity_index]
+
+  - source_id: rba
+    display_name: "Reserve Bank of Australia"
+    region: AU
+    category: central_bank
+    tier: 0
+    url: "https://www.rba.gov.au/"
+    crawl_mode: rss
+    poll_interval_sec: 20
+    source_weight: 0.94
+    credibility_weight: 0.97
+    timeliness_weight: 0.86
+    coverage_weight: 0.82
+    noise_penalty: 0.02
+    tags: [rates, policy, inflation]
+    asset_focus: [fx, bond, commodities]
+
+  - source_id: rbnz
+    display_name: "Reserve Bank of New Zealand"
+    region: NZ
+    category: central_bank
+    tier: 0
+    url: "https://www.rbnz.govt.nz/"
+    crawl_mode: rss
+    poll_interval_sec: 20
+    source_weight: 0.92
+    credibility_weight: 0.96
+    timeliness_weight: 0.85
+    coverage_weight: 0.80
+    noise_penalty: 0.03
+    tags: [rates, policy]
+    asset_focus: [fx, bond]
+
+  - source_id: riksbank
+    display_name: "Sveriges Riksbank"
+    region: SE
+    category: central_bank
+    tier: 0
+    url: "https://www.riksbank.se/"
+    crawl_mode: web
+    poll_interval_sec: 30
+    source_weight: 0.90
+    credibility_weight: 0.95
+    timeliness_weight: 0.82
+    coverage_weight: 0.78
+    noise_penalty: 0.03
+    tags: [rates, policy]
+    asset_focus: [fx, bond]
+
+  - source_id: norges_bank
+    display_name: "Norges Bank"
+    region: NO
+    category: central_bank
+    tier: 0
+    url: "https://www.norges-bank.no/"
+    crawl_mode: web
+    poll_interval_sec: 30
+    source_weight: 0.90
+    credibility_weight: 0.95
+    timeliness_weight: 0.82
+    coverage_weight: 0.78
+    noise_penalty: 0.03
+    tags: [rates, policy]
+    asset_focus: [fx, bond]
+
+  - source_id: bis
+    display_name: "Bank for International Settlements"
+    region: GLOBAL
+    category: policy
+    tier: 0
+    url: "https://www.bis.org/"
+    crawl_mode: rss
+    poll_interval_sec: 60
+    source_weight: 0.90
+    credibility_weight: 0.97
+    timeliness_weight: 0.75
+    coverage_weight: 0.88
+    noise_penalty: 0.03
+    tags: [macro, banking, regulation]
+    asset_focus: [fx, bond, derivatives]
+
+  - source_id: imf
+    display_name: "International Monetary Fund"
+    region: GLOBAL
+    category: policy
+    tier: 0
+    url: "https://www.imf.org/"
+    crawl_mode: rss
+    poll_interval_sec: 60
+    source_weight: 0.90
+    credibility_weight: 0.97
+    timeliness_weight: 0.74
+    coverage_weight: 0.90
+    noise_penalty: 0.03
+    tags: [global_macro, outlook]
+    asset_focus: [fx, bond, equity_index]
+
+  - source_id: world_bank
+    display_name: "World Bank"
+    region: GLOBAL
+    category: policy
+    tier: 0
+    url: "https://www.worldbank.org/"
+    crawl_mode: rss
+    poll_interval_sec: 60
+    source_weight: 0.88
+    credibility_weight: 0.95
+    timeliness_weight: 0.72
+    coverage_weight: 0.88
+    noise_penalty: 0.04
+    tags: [growth, development, commodities]
+    asset_focus: [fx, commodities, equity_index]
+
+  - source_id: oecd
+    display_name: "Organisation for Economic Co-operation and Development"
+    region: GLOBAL
+    category: policy
+    tier: 0
+    url: "https://www.oecd.org/"
+    crawl_mode: rss
+    poll_interval_sec: 60
+    source_weight: 0.86
+    credibility_weight: 0.94
+    timeliness_weight: 0.72
+    coverage_weight: 0.86
+    noise_penalty: 0.04
+    tags: [macro, outlook, policy]
+    asset_focus: [fx, bond, equity_index]
+
+  - source_id: eurostat
+    display_name: "Eurostat"
+    region: EU
+    category: statistics
+    tier: 0
+    url: "https://ec.europa.eu/eurostat"
+    crawl_mode: rss
+    poll_interval_sec: 30
+    source_weight: 0.94
+    credibility_weight: 0.97
+    timeliness_weight: 0.84
+    coverage_weight: 0.88
+    noise_penalty: 0.02
+    tags: [cpi, gdp, labor]
+    asset_focus: [fx, bond, equity_index]
+
+  - source_id: ons_uk
+    display_name: "UK Office for National Statistics"
+    region: UK
+    category: statistics
+    tier: 0
+    url: "https://www.ons.gov.uk/"
+    crawl_mode: rss
+    poll_interval_sec: 30
+    source_weight: 0.93
+    credibility_weight: 0.97
+    timeliness_weight: 0.84
+    coverage_weight: 0.86
+    noise_penalty: 0.02
+    tags: [cpi, gdp, labor]
+    asset_focus: [fx, bond, equity_index]
+
+  - source_id: cme_group
+    display_name: "CME Group"
+    region: US
+    category: exchange
+    tier: 0
+    url: "https://www.cmegroup.com/"
+    crawl_mode: rss
+    poll_interval_sec: 15
+    source_weight: 0.96
+    credibility_weight: 0.97
+    timeliness_weight: 0.92
+    coverage_weight: 0.90
+    noise_penalty: 0.02
+    tags: [futures, options, contracts]
+    asset_focus: [futures, options, commodities, rates]
+
+  - source_id: ice
+    display_name: "Intercontinental Exchange"
+    region: US
+    category: exchange
+    tier: 0
+    url: "https://www.ice.com/"
+    crawl_mode: web
+    poll_interval_sec: 20
+    source_weight: 0.94
+    credibility_weight: 0.96
+    timeliness_weight: 0.88
+    coverage_weight: 0.88
+    noise_penalty: 0.02
+    tags: [futures, exchange]
+    asset_focus: [futures, commodities, equities]
+
+  - source_id: nyse
+    display_name: "New York Stock Exchange"
+    region: US
+    category: exchange
+    tier: 0
+    url: "https://www.nyse.com/"
+    crawl_mode: web
+    poll_interval_sec: 20
+    source_weight: 0.95
+    credibility_weight: 0.97
+    timeliness_weight: 0.88
+    coverage_weight: 0.88
+    noise_penalty: 0.02
+    tags: [listing, market_notice]
+    asset_focus: [equity, etf, options]
+
+  - source_id: nasdaq
+    display_name: "Nasdaq"
+    region: US
+    category: exchange
+    tier: 0
+    url: "https://www.nasdaq.com/"
+    crawl_mode: web
+    poll_interval_sec: 20
+    source_weight: 0.95
+    credibility_weight: 0.97
+    timeliness_weight: 0.88
+    coverage_weight: 0.88
+    noise_penalty: 0.02
+    tags: [listing, market_notice]
+    asset_focus: [equity, etf, options]
+
+  - source_id: lse
+    display_name: "London Stock Exchange"
+    region: UK
+    category: exchange
+    tier: 0
+    url: "https://www.londonstockexchange.com/"
+    crawl_mode: web
+    poll_interval_sec: 30
+    source_weight: 0.92
+    credibility_weight: 0.95
+    timeliness_weight: 0.84
+    coverage_weight: 0.84
+    noise_penalty: 0.03
+    tags: [listing, market_notice]
+    asset_focus: [equity, etf, bond]
+
+  - source_id: eurex
+    display_name: "Eurex"
+    region: EU
+    category: exchange
+    tier: 0
+    url: "https://www.eurex.com/"
+    crawl_mode: web
+    poll_interval_sec: 20
+    source_weight: 0.93
+    credibility_weight: 0.95
+    timeliness_weight: 0.87
+    coverage_weight: 0.84
+    noise_penalty: 0.03
+    tags: [derivatives, rates, equity_index]
+    asset_focus: [futures, options, bond]
+
+  - source_id: reuters
+    display_name: "Reuters Markets"
+    region: GLOBAL
+    category: media
+    tier: 1
+    url: "https://www.reuters.com/markets/"
+    crawl_mode: rss
+    poll_interval_sec: 45
+    source_weight: 0.92
+    credibility_weight: 0.96
+    timeliness_weight: 0.92
+    coverage_weight: 0.95
+    noise_penalty: 0.03
+    tags: [breaking_news, macro, markets]
+    asset_focus: [fx, equity, bond, futures, metals]
+
+  - source_id: bloomberg
+    display_name: "Bloomberg Markets"
+    region: GLOBAL
+    category: media
+    tier: 1
+    url: "https://www.bloomberg.com/markets"
+    crawl_mode: web
+    poll_interval_sec: 45
+    source_weight: 0.91
+    credibility_weight: 0.95
+    timeliness_weight: 0.93
+    coverage_weight: 0.95
+    noise_penalty: 0.03
+    tags: [breaking_news, macro, terminals]
+    asset_focus: [fx, equity, bond, futures, metals, derivatives]
+
+  - source_id: wsj
+    display_name: "The Wall Street Journal Markets"
+    region: US
+    category: media
+    tier: 1
+    url: "https://www.wsj.com/news/markets"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.87
+    credibility_weight: 0.93
+    timeliness_weight: 0.86
+    coverage_weight: 0.90
+    noise_penalty: 0.04
+    tags: [markets, policy, companies]
+    asset_focus: [equity, fx, bond]
+
+  - source_id: ft
+    display_name: "Financial Times Markets"
+    region: UK
+    category: media
+    tier: 1
+    url: "https://www.ft.com/markets"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.88
+    credibility_weight: 0.94
+    timeliness_weight: 0.84
+    coverage_weight: 0.92
+    noise_penalty: 0.04
+    tags: [markets, macro, policy]
+    asset_focus: [equity, fx, bond, commodities]
+
+  - source_id: cnbc
+    display_name: "CNBC Markets"
+    region: US
+    category: media
+    tier: 1
+    url: "https://www.cnbc.com/markets/"
+    crawl_mode: rss
+    poll_interval_sec: 60
+    source_weight: 0.84
+    credibility_weight: 0.90
+    timeliness_weight: 0.88
+    coverage_weight: 0.86
+    noise_penalty: 0.05
+    tags: [markets, live, interviews]
+    asset_focus: [equity, fx, futures]
+
+  - source_id: marketwatch
+    display_name: "MarketWatch"
+    region: US
+    category: media
+    tier: 1
+    url: "https://www.marketwatch.com/"
+    crawl_mode: rss
+    poll_interval_sec: 90
+    source_weight: 0.80
+    credibility_weight: 0.87
+    timeliness_weight: 0.84
+    coverage_weight: 0.83
+    noise_penalty: 0.06
+    tags: [markets, commentary]
+    asset_focus: [equity, etf, fx]
+
+  - source_id: investing_com
+    display_name: "Investing.com"
+    region: GLOBAL
+    category: media
+    tier: 1
+    url: "https://www.investing.com/"
+    crawl_mode: web
+    poll_interval_sec: 90
+    source_weight: 0.78
+    credibility_weight: 0.84
+    timeliness_weight: 0.88
+    coverage_weight: 0.88
+    noise_penalty: 0.07
+    tags: [calendar, markets]
+    asset_focus: [fx, equity, commodities, crypto]
+
+  - source_id: yahoo_finance
+    display_name: "Yahoo Finance"
+    region: GLOBAL
+    category: media
+    tier: 1
+    url: "https://finance.yahoo.com/"
+    crawl_mode: rss
+    poll_interval_sec: 90
+    source_weight: 0.79
+    credibility_weight: 0.85
+    timeliness_weight: 0.84
+    coverage_weight: 0.90
+    noise_penalty: 0.07
+    tags: [markets, earnings]
+    asset_focus: [equity, etf, fx]
+
+  - source_id: nikkei_asia
+    display_name: "Nikkei Asia Markets"
+    region: JP
+    category: media
+    tier: 1
+    url: "https://asia.nikkei.com/"
+    crawl_mode: web
+    poll_interval_sec: 90
+    source_weight: 0.84
+    credibility_weight: 0.90
+    timeliness_weight: 0.82
+    coverage_weight: 0.85
+    noise_penalty: 0.05
+    tags: [asia, macro, markets]
+    asset_focus: [equity_index, fx, commodities]
+
+  - source_id: caixin
+    display_name: "Caixin"
+    region: CN
+    category: media
+    tier: 1
+    url: "https://www.caixin.com/"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.86
+    credibility_weight: 0.91
+    timeliness_weight: 0.84
+    coverage_weight: 0.88
+    noise_penalty: 0.05
+    tags: [china, policy, markets]
+    asset_focus: [equity, bond, fx, commodities]
+
+  - source_id: yicai
+    display_name: "Yicai"
+    region: CN
+    category: media
+    tier: 1
+    url: "https://www.yicai.com/"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.82
+    credibility_weight: 0.88
+    timeliness_weight: 0.85
+    coverage_weight: 0.84
+    noise_penalty: 0.06
+    tags: [china, markets, live]
+    asset_focus: [equity, futures, fx]
+
+  - source_id: stcn
+    display_name: "Securities Times"
+    region: CN
+    category: media
+    tier: 1
+    url: "https://www.stcn.com/"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.81
+    credibility_weight: 0.87
+    timeliness_weight: 0.84
+    coverage_weight: 0.82
+    noise_penalty: 0.06
+    tags: [a_share, policy, companies]
+    asset_focus: [equity, futures]
+
+  - source_id: cs_com
+    display_name: "China Securities Journal"
+    region: CN
+    category: media
+    tier: 1
+    url: "https://www.cs.com.cn/"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.82
+    credibility_weight: 0.88
+    timeliness_weight: 0.82
+    coverage_weight: 0.82
+    noise_penalty: 0.06
+    tags: [a_share, policy]
+    asset_focus: [equity, bond]
+
+  - source_id: cnstock
+    display_name: "Shanghai Securities News"
+    region: CN
+    category: media
+    tier: 1
+    url: "https://www.cnstock.com/"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.82
+    credibility_weight: 0.88
+    timeliness_weight: 0.82
+    coverage_weight: 0.82
+    noise_penalty: 0.06
+    tags: [a_share, policy, listed_companies]
+    asset_focus: [equity, bond]
+
+  - source_id: xinhua_finance
+    display_name: "Xinhua Finance"
+    region: CN
+    category: media
+    tier: 1
+    url: "http://www.news.cn/fortune/"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.86
+    credibility_weight: 0.92
+    timeliness_weight: 0.80
+    coverage_weight: 0.86
+    noise_penalty: 0.05
+    tags: [official_media, macro, policy]
+    asset_focus: [fx, bond, equity_index, commodities]
+
+  - source_id: sina_finance
+    display_name: "Sina Finance"
+    region: CN
+    category: media
+    tier: 1
+    url: "https://finance.sina.com.cn/"
+    crawl_mode: web
+    poll_interval_sec: 90
+    source_weight: 0.76
+    credibility_weight: 0.82
+    timeliness_weight: 0.88
+    coverage_weight: 0.90
+    noise_penalty: 0.08
+    tags: [aggregator, realtime]
+    asset_focus: [equity, futures, fx, metals]
+
+  - source_id: jingji21
+    display_name: "21st Century Business Herald"
+    region: CN
+    category: media
+    tier: 1
+    url: "https://www.21jingji.com/"
+    crawl_mode: web
+    poll_interval_sec: 90
+    source_weight: 0.80
+    credibility_weight: 0.86
+    timeliness_weight: 0.82
+    coverage_weight: 0.84
+    noise_penalty: 0.06
+    tags: [china, finance, industry]
+    asset_focus: [equity, commodities, bond]
+
+  - source_id: wallstreetcn
+    display_name: "Wallstreetcn"
+    region: CN
+    category: media
+    tier: 1
+    url: "https://wallstreetcn.com/"
+    crawl_mode: web
+    poll_interval_sec: 60
+    source_weight: 0.82
+    credibility_weight: 0.87
+    timeliness_weight: 0.90
+    coverage_weight: 0.88
+    noise_penalty: 0.06
+    tags: [macro, realtime, markets]
+    asset_focus: [fx, equity, bond, futures, metals]

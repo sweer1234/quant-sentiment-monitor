@@ -1,0 +1,21 @@
+version: 1
+last_updated: "2026-02-26"
+description: "Environment-specific source overrides. This file should be changed by ops/API."
+
+overrides:
+  - source_id: cnbc
+    enabled: true
+    source_weight: 0.86
+    poll_interval_sec: 45
+
+  - source_id: investing_com
+    enabled: true
+    noise_penalty: 0.08
+
+  - source_id: wallstreetcn
+    enabled: true
+    source_weight: 0.84
+    timeliness_weight: 0.92
+
+  - source_id: some_low_quality_site_example
+    enabled: false
