@@ -18,6 +18,7 @@
   - [2.7 迭代路线图](#27-迭代路线图)
   - [2.8 重点金融网站采集规划](#28-重点金融网站采集规划)
   - [2.9 事件影响判定引擎-多资产多空](#29-事件影响判定引擎-多资产多空)
+  - [2.10 主界面事件信息流规划](#210-主界面事件信息流规划)
 - [3. 功能清单](#3-功能清单)
 - [4. 技术栈建议](#4-技术栈建议)
 - [5. 项目结构模板](#5-项目结构模板)
@@ -102,6 +103,7 @@
 | 性能 | 舆情入库延迟 | P95 < 10s |
 | 性能 | 舆情到信号延迟 | P95 < 60s |
 | 性能 | 重要事件提醒时延（P0） | P95 < 30s |
+| 性能 | 主界面事件流刷新延迟 | P95 < 2s |
 | 可用性 | 核心服务可用率 | > 99.9% |
 | 可靠性 | 数据丢失率 | < 0.01% |
 | 模型效果 | 多空方向判断准确率（离线） | > 65% |
@@ -223,13 +225,71 @@ direction = argmax(P(long), P(short), P(neutral))
 
 #### 输出字段（建议）
 - `event_id`
+- `importance_level`（P0/P1/P2）
+- `importance_score`（0-100）
+- `impacted_markets`（FX/Equity/Bond/Commodity/Derivatives）
 - `asset_class`
 - `instrument`
 - `direction`（long/short/neutral）
 - `confidence`（0-1）
 - `impact_score`（0-100）
+- `long_score`（0-100）
+- `short_score`（0-100）
+- `net_bias_score`（-100~100，正值偏多、负值偏空）
 - `horizon`（intra-day / 1-3d / 1-2w）
 - `explanation`（触发原因，便于人工复核）
+
+### 2.10 主界面事件信息流规划
+
+> 主界面聚焦“事件流 + 影响量化 + 可操作信号”，支持交易员秒级研判。
+
+#### 页面布局（建议）
+- 顶部：系统状态、数据源健康、告警总览
+- 左侧：实时事件信息流（时间倒序、自动去重）
+- 中间：事件详情（摘要、原文链接、证据片段）
+- 右侧：影响面板（影响市场、影响品种、多空量化、置信度）
+- 底部：关联行情微图（1m/5m 变化、波动、成交量）
+
+#### 事件流卡片字段（必须）
+- `time`: 事件发布时间（UTC + 本地时区）
+- `title`: 事件标题
+- `source`: 来源站点与可信度等级
+- `importance_level`: 重要性等级（P0/P1/P2）
+- `importance_score`: 重要性分数（0-100）
+- `impacted_markets`: 影响市场（如 FX、GlobalEquity、Bond）
+- `top_impacted_instruments`: 影响最大的前 N 个品种
+- `net_bias_score`: 多空净影响（-100~100）
+- `direction_summary`: `Bullish / Bearish / Mixed`
+- `latency_ms`: 从采集到展示的链路时延
+
+#### 自动重要性评估（模板）
+```text
+importance_score =
+  a1 * source_authority +
+  a2 * event_severity +
+  a3 * surprise_degree +
+  a4 * cross_market_span +
+  a5 * liquidity_relevance +
+  a6 * recency -
+  a7 * duplicate_penalty
+
+importance_level:
+  score >= 85 -> P0
+  70 <= score < 85 -> P1
+  else -> P2
+```
+
+#### 多空影响大小量化（模板）
+```text
+long_score  = 100 * P(long)
+short_score = 100 * P(short)
+net_bias_score = long_score - short_score
+
+impact_magnitude:
+  |net_bias_score| >= 60 -> strong
+  30 <= |net_bias_score| < 60 -> medium
+  else -> weak
+```
 
 ---
 
@@ -244,7 +304,11 @@ direction = argmax(P(long), P(short), P(neutral))
 - [ ] 事件去重与合并（同事件多源融合）
 - [ ] 事件影响映射（事件 -> 资产池）
 - [ ] 多资产多空判断（外汇、股指、个股、期货、国债、贵金属、衍生品）
+- [ ] 主界面实时事件信息流（支持筛选、排序、搜索）
+- [ ] 自动重要性分级（P0/P1/P2）与重要性分数
 - [ ] 置信度与解释字段输出（可审计）
+- [ ] 多空影响量化（long_score / short_score / net_bias_score）
+- [ ] 影响市场与影响品种 TopN 自动归因
 - [ ] P0/P1 实时提醒（IM/邮件/Webhook）
 - [ ] 因子构建与特征存储
 - [ ] 交易信号生成与阈值配置
@@ -390,6 +454,9 @@ python scripts/run_backtest.py
 | MODEL_NAME | 默认模型名 | FinBERT |
 | EVENT_P0_SLA_SEC | P0 告警时延阈值（秒） | 30 |
 | IMPACT_MIN_CONFIDENCE | 影响判定最小置信度 | 0.65 |
+| EVENT_FEED_PAGE_SIZE | 主界面事件流分页大小 | 50 |
+| EVENT_IMPORTANCE_RULESET | 重要性评分规则配置 | `configs/importance_rules.yaml` |
+| PUBLIC_API_TOKEN | 对外 API 鉴权 Token（示例） | `<replace-me>` |
 | ALERT_WEBHOOK | 告警回调地址 | `<replace-me>` |
 
 ---
@@ -458,6 +525,9 @@ GET /api/v1/events/{event_id}/impact
 {
   "event_id": "evt_20260226_001",
   "title": "FOMC 意外鹰派表态",
+  "importance_level": "P0",
+  "importance_score": 90,
+  "impacted_markets": ["FX", "Bond", "PreciousMetal"],
   "published_at": "2026-02-26T00:00:00Z",
   "impacts": [
     {
@@ -466,6 +536,9 @@ GET /api/v1/events/{event_id}/impact
       "direction": "LONG",
       "confidence": 0.82,
       "impact_score": 88,
+      "long_score": 84,
+      "short_score": 12,
+      "net_bias_score": 72,
       "horizon": "intra-day"
     },
     {
@@ -474,6 +547,9 @@ GET /api/v1/events/{event_id}/impact
       "direction": "SHORT",
       "confidence": 0.77,
       "impact_score": 74,
+      "long_score": 18,
+      "short_score": 79,
+      "net_bias_score": -61,
       "horizon": "1-3d"
     }
   ],
@@ -483,6 +559,112 @@ GET /api/v1/events/{event_id}/impact
   ]
 }
 ```
+
+### 8.5 获取主界面事件信息流（分页）
+
+```http
+GET /api/v1/events/feed?from=2026-02-26T00:00:00Z&to=2026-02-26T23:59:59Z&importance_min=70&market=FX&page=1&page_size=50
+```
+
+响应示例：
+
+```json
+{
+  "page": 1,
+  "page_size": 50,
+  "total": 231,
+  "items": [
+    {
+      "event_id": "evt_20260226_001",
+      "time": "2026-02-26T00:00:05Z",
+      "title": "FOMC 意外鹰派表态",
+      "source": "federalreserve.gov",
+      "importance_level": "P0",
+      "importance_score": 90,
+      "impacted_markets": ["FX", "Bond", "PreciousMetal"],
+      "top_impacted_instruments": ["USDJPY", "UST10Y", "XAUUSD"],
+      "direction_summary": "Bullish USD / Bearish Gold",
+      "net_bias_score": 68,
+      "latency_ms": 824
+    }
+  ]
+}
+```
+
+### 8.6 实时订阅事件流（WebSocket）
+
+```http
+GET /api/v1/stream/events
+```
+
+WebSocket 消息示例：
+
+```json
+{
+  "type": "event_update",
+  "event_id": "evt_20260226_001",
+  "importance_level": "P0",
+  "importance_score": 90,
+  "impacted_markets": ["FX", "Bond", "PreciousMetal"],
+  "top_impacted_instruments": ["USDJPY", "UST10Y", "XAUUSD"],
+  "long_score": 81,
+  "short_score": 16,
+  "net_bias_score": 65,
+  "updated_at": "2026-02-26T00:00:07Z"
+}
+```
+
+### 8.7 批量查询品种受影响情况
+
+```http
+POST /api/v1/impact/batch
+Content-Type: application/json
+Authorization: Bearer <PUBLIC_API_TOKEN>
+```
+
+请求示例：
+
+```json
+{
+  "instruments": ["EURUSD", "XAUUSD", "SPX", "UST10Y"],
+  "window": "4h",
+  "importance_min": 60
+}
+```
+
+响应示例：
+
+```json
+{
+  "window": "4h",
+  "results": [
+    {
+      "instrument": "EURUSD",
+      "events_count": 12,
+      "long_score": 44,
+      "short_score": 57,
+      "net_bias_score": -13,
+      "dominant_direction": "SHORT"
+    },
+    {
+      "instrument": "XAUUSD",
+      "events_count": 9,
+      "long_score": 66,
+      "short_score": 24,
+      "net_bias_score": 42,
+      "dominant_direction": "LONG"
+    }
+  ]
+}
+```
+
+### 8.8 对外接口规范（建议）
+- 鉴权：`API Token` 或 `OAuth2`
+- 限流：按租户进行 QPS 与并发限制
+- 幂等：批量查询接口支持 `request_id`
+- 版本：`/api/v1`，向后兼容字段只增不减
+- 文档：同步提供 OpenAPI / Swagger
+- 回调：支持事件触发式 `Webhook` 推送
 
 ---
 
