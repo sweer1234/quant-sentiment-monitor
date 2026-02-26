@@ -14,6 +14,7 @@ category_multipliers:
   policy: 1.00
   fixed_income: 1.00
   media: 0.95
+  manual: 0.92
 
 tier_multipliers:
   "0": 1.10

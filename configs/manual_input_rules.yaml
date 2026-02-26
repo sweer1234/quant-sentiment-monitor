@@ -1,0 +1,69 @@
+version: 1
+last_updated: "2026-02-26"
+description: "Rules for manual message intake, auto-assessment, and review workflow."
+
+enabled: true
+review_required: true
+
+required_fields:
+  - title
+  - content
+  - operator_id
+  - operator_role
+
+optional_fields:
+  - event_time
+  - source_hint
+  - related_instruments
+  - attachments
+
+operator_role_multipliers:
+  admin: 1.08
+  trader: 1.03
+  analyst: 1.00
+  intern: 0.92
+
+operator_history_multiplier:
+  enabled: true
+  min: 0.85
+  max: 1.15
+  lookback_days: 90
+  based_on:
+    - approved_ratio
+    - post_event_accuracy
+
+evidence_quality_multiplier:
+  enabled: true
+  with_official_link: 1.10
+  with_media_link: 1.05
+  text_only: 0.95
+
+manual_source_weight:
+  base_manual_weight: 0.78
+  formula: "base_manual_weight * operator_role_multiplier * operator_history_multiplier * evidence_quality_multiplier"
+  clamp: [0.0, 1.2]
+
+auto_assessment:
+  importance_level_thresholds:
+    p0: 85
+    p1: 70
+    p2: 0
+  publish_gate:
+    min_importance_score: 60
+    min_confidence: 0.65
+    require_review_for_p0: true
+
+deduplication:
+  enabled: true
+  title_similarity_threshold: 0.88
+  content_similarity_threshold: 0.85
+  time_window_minutes: 180
+
+security:
+  pii_redaction: true
+  blocked_terms_check: true
+  attachment_scan: true
+
+rate_limit:
+  per_operator_per_minute: 20
+  per_operator_per_hour: 200

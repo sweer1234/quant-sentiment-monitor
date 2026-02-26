@@ -1104,3 +1104,19 @@ sources:
     noise_penalty: 0.06
     tags: [macro, realtime, markets]
     asset_focus: [fx, equity, bond, futures, metals]
+
+  - source_id: manual_operator_input
+    display_name: "Manual Operator Input"
+    region: INTERNAL
+    category: manual
+    tier: 1
+    url: "internal://manual-input"
+    crawl_mode: manual
+    poll_interval_sec: 5
+    source_weight: 0.78
+    credibility_weight: 0.80
+    timeliness_weight: 0.95
+    coverage_weight: 0.70
+    noise_penalty: 0.08
+    tags: [manual, analyst_input, trader_input]
+    asset_focus: [fx, equity, equity_index, futures, bond, metals, derivatives]
