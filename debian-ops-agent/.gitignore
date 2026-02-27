@@ -1,0 +1,5 @@
+.venv/
+.env
+ops-agent-audit.log
+__pycache__/
+*.pyc

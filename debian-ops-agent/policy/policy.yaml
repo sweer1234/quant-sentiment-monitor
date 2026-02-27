@@ -1,0 +1,129 @@
+version: 1
+defaults:
+  max_timeout_sec: 120
+  max_output_chars: 12000
+approval:
+  token_env: OPS_AGENT_APPROVAL_TOKEN
+commands:
+  uname:
+    description: 查看内核与架构信息
+    command: ["uname", "-a"]
+    write: false
+    allow_extra_args: false
+
+  os_release:
+    description: 查看 Debian 发行版信息
+    command: ["cat", "/etc/os-release"]
+    write: false
+    allow_extra_args: false
+
+  apt_update:
+    description: 更新软件源缓存
+    command: ["apt-get", "update"]
+    write: true
+    require_approval: true
+    allow_extra_args: false
+
+  apt_install:
+    description: 安装软件包
+    command: ["apt-get", "install", "-y"]
+    write: true
+    require_approval: true
+    allow_extra_args: true
+    min_args: 1
+    max_args: 20
+    arg_pattern: "^[a-zA-Z0-9][a-zA-Z0-9+._-]*$"
+
+  apt_remove:
+    description: 卸载软件包
+    command: ["apt-get", "remove", "-y"]
+    write: true
+    require_approval: true
+    allow_extra_args: true
+    min_args: 1
+    max_args: 20
+    arg_pattern: "^[a-zA-Z0-9][a-zA-Z0-9+._-]*$"
+
+  service_status:
+    description: 查询服务状态
+    command: ["systemctl", "status", "--no-pager"]
+    write: false
+    allow_extra_args: true
+    min_args: 1
+    max_args: 1
+    arg_pattern: "^[a-zA-Z0-9_.@-]+$"
+
+  service_start:
+    description: 启动服务
+    command: ["systemctl", "start"]
+    write: true
+    require_approval: true
+    allow_extra_args: true
+    min_args: 1
+    max_args: 1
+    arg_pattern: "^[a-zA-Z0-9_.@-]+$"
+
+  service_stop:
+    description: 停止服务
+    command: ["systemctl", "stop"]
+    write: true
+    require_approval: true
+    allow_extra_args: true
+    min_args: 1
+    max_args: 1
+    arg_pattern: "^[a-zA-Z0-9_.@-]+$"
+
+  service_restart:
+    description: 重启服务
+    command: ["systemctl", "restart"]
+    write: true
+    require_approval: true
+    allow_extra_args: true
+    min_args: 1
+    max_args: 1
+    arg_pattern: "^[a-zA-Z0-9_.@-]+$"
+
+  journal_service:
+    description: 查看服务最近日志
+    command: ["journalctl", "-n", "200", "--no-pager", "-u"]
+    write: false
+    allow_extra_args: true
+    min_args: 1
+    max_args: 1
+    arg_pattern: "^[a-zA-Z0-9_.@-]+$"
+
+  list_listening_ports:
+    description: 查看监听端口
+    command: ["ss", "-tulpen"]
+    write: false
+    allow_extra_args: false
+
+  disk_usage:
+    description: 查看磁盘使用情况
+    command: ["df", "-h"]
+    write: false
+    allow_extra_args: false
+
+  memory_usage:
+    description: 查看内存使用情况
+    command: ["free", "-h"]
+    write: false
+    allow_extra_args: false
+
+  ping_host:
+    description: 连通性测试
+    command: ["ping", "-c", "4"]
+    write: false
+    allow_extra_args: true
+    min_args: 1
+    max_args: 1
+    arg_pattern: "^[a-zA-Z0-9][a-zA-Z0-9.-]*$"
+
+  curl_head:
+    description: HTTP 头请求测试
+    command: ["curl", "-I", "-L", "--max-time", "10"]
+    write: false
+    allow_extra_args: true
+    min_args: 1
+    max_args: 1
+    arg_pattern: "^https?://[A-Za-z0-9._~:/?#\\[\\]@!$&'()*+,;=%-]+$"

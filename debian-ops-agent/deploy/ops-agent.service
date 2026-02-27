@@ -1,0 +1,17 @@
+[Unit]
+Description=Debian Ops Agent
+After=network.target
+
+[Service]
+Type=simple
+User=opsbot
+Group=opsbot
+WorkingDirectory=/opt/debian-ops-agent
+EnvironmentFile=/opt/debian-ops-agent/.env
+ExecStart=/opt/debian-ops-agent/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8088
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
