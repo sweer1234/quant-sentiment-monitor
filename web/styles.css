@@ -1,0 +1,165 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f3f5f8;
+  color: #222;
+}
+
+.header {
+  padding: 16px 20px;
+  background: #0f3d75;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 16px auto;
+  padding: 0 12px 24px;
+}
+
+.card {
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #dfe3ea;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tab-btn {
+  border: 1px solid #bdd0ea;
+  background: #eaf2ff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.tab-btn.active {
+  background: #0f3d75;
+  color: #fff;
+  border-color: #0f3d75;
+}
+
+.tab {
+  display: none;
+}
+
+.tab.active {
+  display: block;
+}
+
+.grid-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+input,
+textarea,
+select,
+button {
+  font-size: 14px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #c8d2e0;
+}
+
+button {
+  cursor: pointer;
+  background: #fff;
+}
+
+.list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.list-item {
+  border: 1px solid #e2e7f0;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fafcff;
+}
+
+.item-title {
+  font-weight: 700;
+}
+
+.item-meta {
+  color: #5d6b80;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #f8fafc;
+  border: 1px solid #e1e6ef;
+  border-radius: 8px;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 38px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.hint {
+  color: #6a778d;
+  font-size: 12px;
+}
+
+.hidden {
+  display: none;
+}
+
+.footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 6px 12px;
+}
+
+#toast {
+  margin: 0 auto;
+  max-width: 1200px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-height: 18px;
+}

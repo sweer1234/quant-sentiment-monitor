@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QSM 操作台</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1>金融舆情监控操作台</h1>
+      <div id="sessionInfo" class="session-info">未登录</div>
+    </header>
+
+    <main class="container">
+      <section id="loginPanel" class="card">
+        <h2>登录</h2>
+        <form id="loginForm" class="grid-form">
+          <label>用户名 <input id="loginUsername" value="demo" required /></label>
+          <label>密码 <input id="loginPassword" type="password" value="demo123" required /></label>
+          <button type="submit">登录</button>
+        </form>
+        <p class="hint">内置账号：demo/demo123, adollman/dev123, sweer1234/dev123</p>
+      </section>
+
+      <section id="appPanel" class="hidden">
+        <nav class="tabs">
+          <button class="tab-btn active" data-tab="eventsTab">事件流</button>
+          <button class="tab-btn" data-tab="alertsTab">告警</button>
+          <button class="tab-btn" data-tab="sourcesTab">站点</button>
+          <button class="tab-btn" data-tab="manualTab">手工消息</button>
+          <button class="tab-btn" data-tab="profileTab">个人配置</button>
+          <button class="tab-btn" data-tab="adminTab">系统面板</button>
+        </nav>
+
+        <section id="eventsTab" class="tab card active">
+          <div class="section-header">
+            <h2>事件流</h2>
+            <button id="refreshEventsBtn">刷新</button>
+          </div>
+          <div id="eventsList" class="list"></div>
+          <h3>事件接入</h3>
+          <form id="ingestForm" class="grid-form">
+            <label>来源ID <input id="ingestSource" value="federal_reserve" required /></label>
+            <label>标题 <input id="ingestTitle" required /></label>
+            <label>内容 <textarea id="ingestContent" rows="3" required></textarea></label>
+            <label>相关品种（逗号分隔） <input id="ingestInstruments" placeholder="DXY,UST10Y" /></label>
+            <button type="submit">提交事件</button>
+          </form>
+        </section>
+
+        <section id="alertsTab" class="tab card">
+          <div class="section-header">
+            <h2>告警</h2>
+            <button id="refreshAlertsBtn">刷新</button>
+          </div>
+          <div id="alertsList" class="list"></div>
+        </section>
+
+        <section id="sourcesTab" class="tab card">
+          <div class="section-header">
+            <h2>站点管理</h2>
+            <button id="refreshSourcesBtn">刷新</button>
+          </div>
+          <div id="sourcesList" class="list"></div>
+          <h3>更新站点</h3>
+          <form id="patchSourceForm" class="grid-form">
+            <label>source_id <input id="sourceIdInput" required /></label>
+            <label>enabled <input id="sourceEnabledInput" value="true" /></label>
+            <label>source_weight <input id="sourceWeightInput" value="0.8" /></label>
+            <button type="submit">提交更新</button>
+          </form>
+        </section>
+
+        <section id="manualTab" class="tab card">
+          <h2>手工消息录入</h2>
+          <form id="manualForm" class="grid-form">
+            <label>标题 <input id="manualTitle" required /></label>
+            <label>内容 <textarea id="manualContent" rows="3" required></textarea></label>
+            <label>录入人ID <input id="manualOperatorId" value="ui_operator" required /></label>
+            <label>录入人角色 <input id="manualOperatorRole" value="analyst" required /></label>
+            <label>相关品种（逗号分隔） <input id="manualInstruments" /></label>
+            <button type="submit">创建消息</button>
+          </form>
+          <div id="manualResult" class="mono"></div>
+        </section>
+
+        <section id="profileTab" class="tab card">
+          <h2>个人配置</h2>
+          <form id="prefsForm" class="grid-form">
+            <label>关键词（逗号分隔） <input id="prefKeywords" /></label>
+            <label>市场（逗号分隔） <input id="prefMarkets" placeholder="fx,futures" /></label>
+            <label>品种（逗号分隔） <input id="prefInstruments" placeholder="DXY,CL" /></label>
+            <label>最小告警级别
+              <select id="prefAlertLevel">
+                <option value="P0">P0</option>
+                <option value="P1">P1</option>
+                <option value="P2" selected>P2</option>
+              </select>
+            </label>
+            <button type="submit">保存配置</button>
+          </form>
+          <div id="profileResult" class="mono"></div>
+        </section>
+
+        <section id="adminTab" class="tab card">
+          <div class="section-header">
+            <h2>系统面板</h2>
+            <button id="refreshAdminBtn">刷新</button>
+          </div>
+          <div class="actions">
+            <button id="processNotificationsBtn">处理通知</button>
+            <button id="processCollectorTasksBtn">处理采集任务</button>
+          </div>
+          <div id="adminInfo" class="mono"></div>
+        </section>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div id="toast"></div>
+    </footer>
+
+    <script src="/web/app.js"></script>
+  </body>
+</html>

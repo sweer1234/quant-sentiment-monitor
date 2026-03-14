@@ -533,6 +533,10 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 python3 scripts/run_model_service.py
 ```
 
+前台登录与操作界面（新增）：
+- `http://127.0.0.1:8000/ui`
+- 简版看板仍可用：`http://127.0.0.1:8000/dashboard`
+
 ### 6.7 运行核心流程（示例）
 
 ```bash

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
+from fastapi.responses import FileResponse
 from fastapi.responses import HTMLResponse
 from fastapi.responses import PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
 from .models import (
     AlertPolicyUpdateRequest,
@@ -47,6 +50,10 @@ app = FastAPI(
     version="0.5.0",
     description="MVP backend for financial sentiment and event impact monitoring.",
 )
+
+WEB_DIR = Path(__file__).resolve().parents[2] / "web"
+if WEB_DIR.exists():
+    app.mount("/web", StaticFiles(directory=str(WEB_DIR)), name="web")
 
 
 def require_token(authorization: str = Header(default="", alias="Authorization")) -> None:
@@ -96,10 +103,19 @@ def root() -> dict[str, str]:
         "service": settings.app_name,
         "version": "0.5.0",
         "docs": "/docs",
+        "ui": "/ui",
         "health": "/api/v1/health",
         "openapi": "/openapi.json",
         "collector_queue_backend": collector_task_queue.backend_name(),
     }
+
+
+@app.get("/ui")
+def ui_page() -> FileResponse:
+    index_path = WEB_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="ui not found")
+    return FileResponse(str(index_path))
 
 
 @app.get("/dashboard", response_class=HTMLResponse)

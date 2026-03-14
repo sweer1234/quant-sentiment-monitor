@@ -33,6 +33,15 @@ def test_health() -> None:
     assert payload["sources"] > 0
 
 
+def test_ui_shell_assets() -> None:
+    ui = client.get("/ui")
+    assert ui.status_code == 200
+    assert "金融舆情监控操作台" in ui.text
+    js = client.get("/web/app.js")
+    assert js.status_code == 200
+    assert "bootstrapAfterLogin" in js.text
+
+
 def test_sources_list_and_patch() -> None:
     response = client.get("/api/v1/sources?enabled=true")
     assert response.status_code == 200
