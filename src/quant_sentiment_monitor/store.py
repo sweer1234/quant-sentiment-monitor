@@ -676,7 +676,7 @@ class QuantStore:
             result.append(event)
         return result
 
-    def create_manual_message(self, request: ManualMessageCreateRequest) -> ManualMessageRecord:
+    def _manual_message_assessment(self, request: ManualMessageCreateRequest) -> dict[str, Any]:
         role_mult = float(self.manual_input_rules.get("operator_role_multipliers", {}).get(request.operator_role, 1.0))
         history_mult = 1.02
         evidence_mult = 1.10 if request.attachments else 0.95
@@ -695,39 +695,121 @@ class QuantStore:
         long_score = round(sum(item.long_score for item in event.impacts) / len(event.impacts), 2)
         short_score = round(sum(item.short_score for item in event.impacts) / len(event.impacts), 2)
         net_bias = round(long_score - short_score, 2)
+        return {
+            "event": event,
+            "importance_score": importance_score,
+            "importance_level": importance_level,
+            "impacted_markets": event.impacted_markets,
+            "top_impacted_instruments": top_impacted,
+            "long_score": long_score,
+            "short_score": short_score,
+            "net_bias_score": net_bias,
+            "assessment_explanation": [
+                "event_type_supply_shock" if "减产" in request.content else "general_event_pattern",
+                "cross_market_link_detected",
+                f"operator_role_multiplier_{role_mult:.2f}",
+            ],
+        }
+
+    def _publish_manual_message_event(self, record: ManualMessageRecord) -> str | None:
+        if record.linked_event_id and record.linked_event_id in self.events:
+            return record.linked_event_id
+        assessed = self._manual_message_assessment(record.request)
+        event = assessed["event"]
+        event.importance_score = float(record.importance_score)
+        event.importance_level = str(record.importance_level)  # type: ignore[assignment]
+        self.events[event.event_id] = event
+        self._create_alert_for_event(event)
+        return event.event_id
+
+    def create_manual_message(self, request: ManualMessageCreateRequest, *, as_draft: bool = False) -> ManualMessageRecord:
         now = now_utc()
+        if as_draft:
+            record = ManualMessageRecord(
+                manual_message_id=self._next_manual_id(),
+                status="draft",
+                request=request,
+                importance_level="P2",  # type: ignore[arg-type]
+                importance_score=0.0,
+                impacted_markets=[],
+                top_impacted_instruments=[],
+                long_score=50.0,
+                short_score=50.0,
+                net_bias_score=0.0,
+                assessment_explanation=[],
+                created_at=now,
+                updated_at=now,
+            )
+            self.manual_messages[record.manual_message_id] = record
+            self._audit("manual.create_draft", request.operator_id, {"manual_message_id": record.manual_message_id})
+            self._persist_state()
+            return record
+
+        assessed = self._manual_message_assessment(request)
 
         record = ManualMessageRecord(
             manual_message_id=self._next_manual_id(),
             status="auto_assessed",
             request=request,
-            importance_level=importance_level,  # type: ignore[arg-type]
-            importance_score=importance_score,
-            impacted_markets=event.impacted_markets,
-            top_impacted_instruments=top_impacted,
-            long_score=long_score,
-            short_score=short_score,
-            net_bias_score=net_bias,
-            assessment_explanation=[
-                "event_type_supply_shock" if "减产" in request.content else "general_event_pattern",
-                "cross_market_link_detected",
-                f"operator_role_multiplier_{role_mult:.2f}",
-            ],
+            importance_level=assessed["importance_level"],  # type: ignore[arg-type]
+            importance_score=float(assessed["importance_score"]),
+            impacted_markets=list(assessed["impacted_markets"]),
+            top_impacted_instruments=list(assessed["top_impacted_instruments"]),
+            long_score=float(assessed["long_score"]),
+            short_score=float(assessed["short_score"]),
+            net_bias_score=float(assessed["net_bias_score"]),
+            assessment_explanation=list(assessed["assessment_explanation"]),
             created_at=now,
             updated_at=now,
         )
         self.manual_messages[record.manual_message_id] = record
 
-        if importance_score >= float(self.manual_input_rules.get("auto_assessment", {}).get("publish_gate", {}).get("min_importance_score", 60)):
-            event.importance_score = importance_score
-            event.importance_level = importance_level  # type: ignore[assignment]
-            self.events[event.event_id] = event
-            record.linked_event_id = event.event_id
-            self._create_alert_for_event(event)
+        if float(record.importance_score) >= float(
+            self.manual_input_rules.get("auto_assessment", {}).get("publish_gate", {}).get("min_importance_score", 60)
+        ):
+            record.linked_event_id = self._publish_manual_message_event(record)
+        self._audit("manual.create", request.operator_id, {"manual_message_id": record.manual_message_id})
         self._persist_state()
         return record
 
-    def review_manual_message(self, manual_message_id: str, action: str) -> ManualMessageRecord | None:
+    def submit_manual_message(self, manual_message_id: str, *, actor: str = "system") -> ManualMessageRecord | None:
+        record = self.manual_messages.get(manual_message_id)
+        if not record:
+            return None
+        if record.status not in {"draft"}:
+            return record
+        record.status = "submitted"
+        assessed = self._manual_message_assessment(record.request)
+        record.status = "auto_assessed"
+        record.importance_level = assessed["importance_level"]  # type: ignore[assignment]
+        record.importance_score = float(assessed["importance_score"])
+        record.impacted_markets = list(assessed["impacted_markets"])
+        record.top_impacted_instruments = list(assessed["top_impacted_instruments"])
+        record.long_score = float(assessed["long_score"])
+        record.short_score = float(assessed["short_score"])
+        record.net_bias_score = float(assessed["net_bias_score"])
+        record.assessment_explanation = list(assessed["assessment_explanation"])
+        record.updated_at = now_utc()
+        self._audit("manual.submit", actor, {"manual_message_id": manual_message_id})
+        self._persist_state()
+        return record
+
+    def publish_manual_message(self, manual_message_id: str, *, actor: str = "system") -> ManualMessageRecord | None:
+        record = self.manual_messages.get(manual_message_id)
+        if not record:
+            return None
+        if record.status in {"rejected", "revoked"}:
+            return None
+        if record.status not in {"approved", "auto_assessed", "published"}:
+            return None
+        record.linked_event_id = self._publish_manual_message_event(record)
+        record.status = "published"
+        record.updated_at = now_utc()
+        self._audit("manual.publish", actor, {"manual_message_id": manual_message_id, "event_id": record.linked_event_id})
+        self._persist_state()
+        return record
+
+    def review_manual_message(self, manual_message_id: str, action: str, *, actor: str = "system") -> ManualMessageRecord | None:
         record = self.manual_messages.get(manual_message_id)
         if not record:
             return None
@@ -739,11 +821,12 @@ class QuantStore:
             record.status = "revoked"
             if record.linked_event_id and record.linked_event_id in self.events:
                 del self.events[record.linked_event_id]
+        self._audit("manual.review", actor, {"manual_message_id": manual_message_id, "action": action})
         record.updated_at = now_utc()
         self._persist_state()
         return record
 
-    def re_evaluate_manual_message(self, manual_message_id: str) -> ManualMessageRecord | None:
+    def re_evaluate_manual_message(self, manual_message_id: str, *, actor: str = "system") -> ManualMessageRecord | None:
         existing = self.manual_messages.get(manual_message_id)
         if not existing:
             return None
@@ -752,6 +835,7 @@ class QuantStore:
         refreshed.manual_message_id = manual_message_id
         refreshed.created_at = existing.created_at
         self.manual_messages[manual_message_id] = refreshed
+        self._audit("manual.re_evaluate", actor, {"manual_message_id": manual_message_id})
         self._persist_state()
         return refreshed
 

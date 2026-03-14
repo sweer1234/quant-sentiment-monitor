@@ -152,6 +152,38 @@ def test_manual_message_flow() -> None:
     )
     assert reevaluate.status_code == 200
 
+    draft_create = client.post(
+        "/api/v1/manual/messages/draft",
+        headers=TOKEN,
+        json={
+            "title": "盘中线索：某国央行可能临时沟通",
+            "content": "值班同事反馈央行可能临时释出沟通，待确认。",
+            "operator_id": "u_shift_001",
+            "operator_role": "analyst",
+            "related_instruments": ["DXY"],
+        },
+    )
+    assert draft_create.status_code == 200
+    draft_id = draft_create.json()["manual_message_id"]
+    assert draft_create.json()["status"] == "draft"
+
+    draft_submit = client.post(f"/api/v1/manual/messages/{draft_id}/submit", headers=TOKEN)
+    assert draft_submit.status_code == 200
+    assert draft_submit.json()["status"] == "auto_assessed"
+
+    draft_review = client.post(
+        f"/api/v1/manual/messages/{draft_id}/review",
+        headers=TOKEN,
+        json={"action": "approve", "review_comment": "通过"},
+    )
+    assert draft_review.status_code == 200
+    assert draft_review.json()["status"] == "approved"
+
+    draft_publish = client.post(f"/api/v1/manual/messages/{draft_id}/publish", headers=TOKEN)
+    assert draft_publish.status_code == 200
+    assert draft_publish.json()["status"] == "published"
+    assert draft_publish.json()["linked_event_id"] is not None
+
 
 def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     headers = _login_headers()
@@ -435,6 +467,10 @@ def test_auth_and_permission_denied_paths() -> None:
         json={"action": "approve"},
     )
     assert denied_review.status_code == 403
+    denied_publish = client.post(f"/api/v1/manual/messages/{mm_id}/publish", headers=analyst_headers)
+    assert denied_publish.status_code == 403
+    denied_reevaluate = client.post(f"/api/v1/manual/messages/{mm_id}/re-evaluate", headers=analyst_headers)
+    assert denied_reevaluate.status_code == 403
 
     # Public token keeps backward compatibility for manual review.
     public_review = client.post(

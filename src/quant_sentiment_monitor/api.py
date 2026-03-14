@@ -320,6 +320,12 @@ def create_manual_message(request: ManualMessageCreateRequest, _: None = Depends
     return record.model_dump(mode="json")
 
 
+@app.post("/api/v1/manual/messages/draft")
+def create_manual_message_draft(request: ManualMessageCreateRequest, _: None = Depends(require_token)) -> dict[str, Any]:
+    record = store.create_manual_message(request, as_draft=True)
+    return record.model_dump(mode="json")
+
+
 @app.get("/api/v1/manual/messages/{manual_message_id}")
 def get_manual_message(manual_message_id: str) -> dict[str, Any]:
     record = store.manual_messages.get(manual_message_id)
@@ -332,9 +338,9 @@ def get_manual_message(manual_message_id: str) -> dict[str, Any]:
 def review_manual_message(
     manual_message_id: str,
     request: ManualMessageReviewRequest,
-    _: str = Depends(require_public_or_permission("manual.review")),
+    actor: str = Depends(require_public_or_permission("manual.review")),
 ) -> dict[str, Any]:
-    record = store.review_manual_message(manual_message_id=manual_message_id, action=request.action)
+    record = store.review_manual_message(manual_message_id=manual_message_id, action=request.action, actor=actor)
     if not record:
         raise HTTPException(status_code=404, detail="manual message not found")
     return {
@@ -345,9 +351,31 @@ def review_manual_message(
     }
 
 
+@app.post("/api/v1/manual/messages/{manual_message_id}/submit")
+def submit_manual_message(manual_message_id: str, _: None = Depends(require_token)) -> dict[str, Any]:
+    record = store.submit_manual_message(manual_message_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="manual message not found")
+    return record.model_dump(mode="json")
+
+
+@app.post("/api/v1/manual/messages/{manual_message_id}/publish")
+def publish_manual_message(
+    manual_message_id: str,
+    actor: str = Depends(require_public_or_permission("manual.review")),
+) -> dict[str, Any]:
+    record = store.publish_manual_message(manual_message_id, actor=actor)
+    if not record:
+        raise HTTPException(status_code=404, detail="manual message not found or invalid status")
+    return record.model_dump(mode="json")
+
+
 @app.post("/api/v1/manual/messages/{manual_message_id}/re-evaluate")
-def reevaluate_manual_message(manual_message_id: str, _: None = Depends(require_token)) -> dict[str, Any]:
-    record = store.re_evaluate_manual_message(manual_message_id)
+def reevaluate_manual_message(
+    manual_message_id: str,
+    actor: str = Depends(require_public_or_permission("manual.review")),
+) -> dict[str, Any]:
+    record = store.re_evaluate_manual_message(manual_message_id, actor=actor)
     if not record:
         raise HTTPException(status_code=404, detail="manual message not found")
     return record.model_dump(mode="json")

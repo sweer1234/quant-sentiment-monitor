@@ -58,7 +58,7 @@ class ManualMessageReviewRequest(BaseModel):
 
 class ManualMessageRecord(BaseModel):
     manual_message_id: str
-    status: Literal["submitted", "auto_assessed", "approved", "rejected", "revoked"]
+    status: Literal["draft", "submitted", "auto_assessed", "approved", "rejected", "revoked", "published"]
     request: ManualMessageCreateRequest
     importance_level: ImportanceLevel
     importance_score: float
