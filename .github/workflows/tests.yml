@@ -26,3 +26,7 @@ jobs:
       - name: Run test suite
         run: |
           python -m pytest
+
+      - name: Run coverage gate
+        run: |
+          python -m pytest --cov=src/quant_sentiment_monitor --cov-report=term --cov-fail-under=75

@@ -1107,6 +1107,7 @@ python scripts/run_backtest.py \
 ```bash
 python3 -m pytest
 bash scripts/run_tests.sh
+bash scripts/run_tests_cov.sh
 ```
 
 CI 已内置：`.github/workflows/tests.yml`（push 到 `main` / PR 自动执行 pytest）。
