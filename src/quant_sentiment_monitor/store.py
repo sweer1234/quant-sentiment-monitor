@@ -76,8 +76,13 @@ class QuantStore:
         self.calendar_events: dict[str, dict[str, Any]] = {}
         self._source_by_id: dict[str, dict[str, Any]] = {}
         self.reload_configs()
-        self._seed_events()
-        self._seed_calendar_events()
+        loaded = self._load_state()
+        if not loaded:
+            self._seed_events()
+            self._seed_calendar_events()
+            self._persist_state()
+        elif not self.calendar_events:
+            self._seed_calendar_events()
 
     def reload_configs(self) -> dict[str, Any]:
         with self._lock:
@@ -126,6 +131,57 @@ class QuantStore:
                 "effective_sources_loaded": len(self.sources),
                 "reloaded_at": now_utc().isoformat(),
             }
+
+    def _persist_state(self) -> None:
+        state_file = self.settings.state_path_obj
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "events": [event.model_dump(mode="json") for event in self.events.values()],
+            "manual_messages": [item.model_dump(mode="json") for item in self.manual_messages.values()],
+            "alerts": list(self.alerts.values()),
+            "alert_acks": self.alert_acks,
+            "user_preferences": self.user_preferences,
+            "user_alert_subscriptions": self.user_alert_subscriptions,
+            "user_topic_subscriptions": {k: sorted(v) for k, v in self.user_topic_subscriptions.items()},
+            "feedback_records": self.feedback_records,
+            "webhook_subscriptions": list(self.webhook_subscriptions.values()),
+            "webhook_deliveries": self.webhook_deliveries,
+            "webhook_queue": self.webhook_queue,
+            "calendar_events": list(self.calendar_events.values()),
+        }
+        with state_file.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    def _load_state(self) -> bool:
+        state_file = self.settings.state_path_obj
+        if not state_file.exists():
+            return False
+        try:
+            with state_file.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            return False
+
+        try:
+            self.events = {item["event_id"]: Event(**item) for item in payload.get("events", [])}
+            self.manual_messages = {item["manual_message_id"]: ManualMessageRecord(**item) for item in payload.get("manual_messages", [])}
+            self.alerts = {item["alert_id"]: item for item in payload.get("alerts", [])}
+            self.alert_acks = list(payload.get("alert_acks", []))
+            self.user_preferences = dict(payload.get("user_preferences", {}))
+            self.user_alert_subscriptions = dict(payload.get("user_alert_subscriptions", {}))
+            self.user_topic_subscriptions = {k: set(v) for k, v in dict(payload.get("user_topic_subscriptions", {})).items()}
+            self.feedback_records = list(payload.get("feedback_records", []))
+            self.webhook_subscriptions = {
+                item["subscription_id"]: item for item in payload.get("webhook_subscriptions", []) if "subscription_id" in item
+            }
+            self.webhook_deliveries = list(payload.get("webhook_deliveries", []))
+            self.webhook_queue = list(payload.get("webhook_queue", []))
+            self.calendar_events = {
+                item["calendar_event_id"]: item for item in payload.get("calendar_events", []) if "calendar_event_id" in item
+            }
+            return True
+        except Exception:
+            return False
 
     def _next_event_id(self) -> str:
         return f"evt_{uuid4().hex[:12]}"
@@ -284,6 +340,7 @@ class QuantStore:
 
         self.events[event.event_id] = event
         alert = self._create_alert_for_event(event)
+        self._persist_state()
         return {
             "event": event.model_dump(mode="json"),
             "alert": deepcopy(alert) if alert else None,
@@ -366,6 +423,7 @@ class QuantStore:
             self._source_by_id[source_id].update({k: v for k, v in patch_data.items() if v is not None})
             source = deepcopy(self._source_by_id[source_id])
             source["effective_source_weight"] = round(calculate_effective_source_weight(source), 4)
+            self._persist_state()
             return source
 
     def batch_update_sources(self, operations: list[dict[str, Any]]) -> dict[str, Any]:
@@ -462,6 +520,7 @@ class QuantStore:
             self.events[event.event_id] = event
             record.linked_event_id = event.event_id
             self._create_alert_for_event(event)
+        self._persist_state()
         return record
 
     def review_manual_message(self, manual_message_id: str, action: str) -> ManualMessageRecord | None:
@@ -477,6 +536,7 @@ class QuantStore:
             if record.linked_event_id and record.linked_event_id in self.events:
                 del self.events[record.linked_event_id]
         record.updated_at = now_utc()
+        self._persist_state()
         return record
 
     def re_evaluate_manual_message(self, manual_message_id: str) -> ManualMessageRecord | None:
@@ -488,6 +548,7 @@ class QuantStore:
         refreshed.manual_message_id = manual_message_id
         refreshed.created_at = existing.created_at
         self.manual_messages[manual_message_id] = refreshed
+        self._persist_state()
         return refreshed
 
     def sentiment_for_symbol(self, symbol: str) -> tuple[float, float, int]:
@@ -613,6 +674,7 @@ class QuantStore:
         for key, value in payload.items():
             if value is not None:
                 current[key] = value
+        self._persist_state()
         return deepcopy(current)
 
     def update_user_alert_subscriptions(self, username: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -620,12 +682,14 @@ class QuantStore:
         for key, value in payload.items():
             if value is not None:
                 current[key] = value
+        self._persist_state()
         return deepcopy(current)
 
     def update_topic_subscriptions(self, username: str, topic_ids: list[str]) -> list[str]:
         available = {item.get("topic_id") for item in self.topic_taxonomy.get("topics", [])}
         selected = {topic_id for topic_id in topic_ids if topic_id in available}
         self.user_topic_subscriptions[username] = selected
+        self._persist_state()
         return sorted(selected)
 
     def topic_catalog(self) -> list[dict[str, Any]]:
@@ -745,6 +809,7 @@ class QuantStore:
         for key, value in payload.items():
             if value is not None:
                 self.alert_policies[key] = value
+        self._persist_state()
         return deepcopy(self.alert_policies)
 
     def list_alerts(
@@ -787,6 +852,7 @@ class QuantStore:
                 "acked_at": alert["acked_at"],
             }
         )
+        self._persist_state()
         return deepcopy(alert)
 
     def revoke_alert(self, alert_id: str, reason: str) -> dict[str, Any]:
@@ -802,6 +868,7 @@ class QuantStore:
             self.alerts[alert_id]["status"] = "revoked"
             self.alerts[alert_id]["updated_at"] = revoked["revoked_at"]
             self.alerts[alert_id]["revoke_reason"] = reason
+        self._persist_state()
         return revoked
 
     def add_feedback(self, username: str, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -815,6 +882,7 @@ class QuantStore:
             "created_at": now_utc().isoformat(),
         }
         self.feedback_records.append(record)
+        self._persist_state()
         return record
 
     def billing_usage(self, tenant_id: str, period: str) -> dict[str, Any]:
@@ -897,6 +965,7 @@ class QuantStore:
         current.setdefault("importance_level", "P1")
         current.setdefault("event_time", now_utc().isoformat())
         self.calendar_events[event_id] = current
+        self._persist_state()
         return deepcopy(current)
 
     def _build_webhook_payload(self, sample_event: dict[str, Any] | None) -> dict[str, Any]:
@@ -983,6 +1052,7 @@ class QuantStore:
             "failed_deliveries": 0,
         }
         self.webhook_subscriptions[subscription_id] = record
+        self._persist_state()
         return self._mask_webhook_record(record)
 
     def list_webhook_subscriptions(self, username: str | None = None) -> list[dict[str, Any]]:
@@ -1001,6 +1071,7 @@ class QuantStore:
         if record.get("owner") != username and self.user_role(username) != "admin":
             return False
         del self.webhook_subscriptions[subscription_id]
+        self._persist_state()
         return True
 
     def dispatch_webhook_test(self, event_id: str | None = None, *, force_fail: bool = False) -> dict[str, Any]:
@@ -1044,6 +1115,7 @@ class QuantStore:
                 }
             )
             queued += 1
+        self._persist_state()
         return {
             "status": "ok",
             "queued_subscriptions": queued,
@@ -1100,7 +1172,7 @@ class QuantStore:
                 }
             )
             requeued += 1
-
+        self._persist_state()
         return {
             "status": "ok",
             "retried": retried,
@@ -1174,6 +1246,7 @@ class QuantStore:
                 failed += 1
 
         self.webhook_queue = remaining_jobs
+        self._persist_state()
         return {
             "status": "ok",
             "processed": processed,

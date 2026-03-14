@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     billing_sla_rules: str = "configs/billing_sla_rules.yaml"
     event_calendar_rules: str = "configs/event_calendar_rules.yaml"
     webhook_delivery_rules: str = "configs/webhook_delivery_rules.yaml"
+    state_path: str = "data/state.json"
 
     model_config = SettingsConfigDict(env_prefix="QSM_", env_file=".env", extra="ignore")
 
@@ -81,3 +82,7 @@ class Settings(BaseSettings):
     @property
     def webhook_delivery_rules_path(self) -> Path:
         return Path(self.webhook_delivery_rules)
+
+    @property
+    def state_path_obj(self) -> Path:
+        return Path(self.state_path)

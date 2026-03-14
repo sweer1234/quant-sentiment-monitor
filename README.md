@@ -619,6 +619,8 @@ curl -s "http://127.0.0.1:8000/api/v1/webhooks/stats" \
 | EVENT_IMPORTANCE_RULESET | 重要性评分规则配置 | `configs/importance_rules.yaml` |
 | PUBLIC_API_TOKEN | 对外 API 鉴权 Token（示例） | `<replace-me>` |
 | ALERT_WEBHOOK | 告警回调地址 | `<replace-me>` |
+| QSM_WEBHOOK_DELIVERY_RULES | Webhook 队列与退避策略 | `configs/webhook_delivery_rules.yaml` |
+| QSM_STATE_PATH | 本地状态持久化文件路径 | `data/state.json` |
 
 ---
 

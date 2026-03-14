@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from fastapi.testclient import TestClient
+
+TEST_STATE_PATH = Path("data/test_state_api.json")
+if TEST_STATE_PATH.exists():
+    TEST_STATE_PATH.unlink()
+os.environ["QSM_STATE_PATH"] = str(TEST_STATE_PATH)
 
 from quant_sentiment_monitor.api import app, settings
 
