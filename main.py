@@ -7,5 +7,5 @@ SRC_PATH = ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from quant_sentiment_monitor.api import app
+from quant_sentiment_monitor.api import app  # noqa: F401
 
