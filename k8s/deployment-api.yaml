@@ -12,6 +12,7 @@ spec:
       labels:
         app: qsm-api
     spec:
+      serviceAccountName: qsm-api
       containers:
         - name: api
           image: qsm-api:latest
@@ -21,6 +22,15 @@ spec:
           envFrom:
             - configMapRef:
                 name: qsm-config
+            - secretRef:
+                name: qsm-secrets
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
           readinessProbe:
             httpGet:
               path: /api/v1/health

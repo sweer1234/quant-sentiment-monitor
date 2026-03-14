@@ -12,6 +12,7 @@ spec:
       labels:
         app: qsm-collector-worker
     spec:
+      serviceAccountName: qsm-api
       containers:
         - name: worker
           image: qsm-api:latest
@@ -20,3 +21,12 @@ spec:
           envFrom:
             - configMapRef:
                 name: qsm-config
+            - secretRef:
+                name: qsm-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

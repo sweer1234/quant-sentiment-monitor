@@ -1176,12 +1176,24 @@ CI 已内置：`.github/workflows/tests.yml`（push 到 `main` / PR 自动执行
 
 参考清单（已提供模板）：
 ```bash
+kubectl apply -f k8s/serviceaccount.yaml
 kubectl apply -f k8s/configmap.yaml
+kubectl apply -f k8s/secret.example.yaml
 kubectl apply -f k8s/deployment-model.yaml
 kubectl apply -f k8s/deployment-api.yaml
 kubectl apply -f k8s/deployment-worker.yaml
 kubectl apply -f k8s/service.yaml
 kubectl apply -f k8s/service-model.yaml
+kubectl apply -f k8s/hpa-api.yaml
+kubectl apply -f k8s/hpa-worker.yaml
+kubectl apply -f k8s/pdb-api.yaml
+kubectl apply -f k8s/networkpolicy.yaml
+kubectl apply -f k8s/ingress.yaml
+```
+
+或使用 kustomize 一次性部署：
+```bash
+kubectl apply -k k8s
 ```
 
 ### 13.3 CI/CD（示例）
