@@ -15,12 +15,24 @@ services:
       QSM_DATABASE_URL: postgresql+psycopg://qsm:qsm@postgres:5432/qsm
       QSM_QUEUE_BACKEND: redis
       QSM_QUEUE_REDIS_URL: redis://redis:6379/0
+      QSM_MODEL_BACKEND: http
+      QSM_MODEL_SERVICE_URL: http://qsm-model:9000/infer
     volumes:
       - ./data:/app/data
       - ./configs:/app/configs
     depends_on:
       - postgres
       - redis
+      - qsm-model
+
+  qsm-model:
+    build: .
+    container_name: qsm-model
+    command: ["uvicorn", "model_service.main:app", "--host", "0.0.0.0", "--port", "9000"]
+    environment:
+      PYTHONPATH: /app/src
+    ports:
+      - "9000:9000"
 
   postgres:
     image: postgres:16

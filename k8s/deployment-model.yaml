@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qsm-model
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qsm-model
+  template:
+    metadata:
+      labels:
+        app: qsm-model
+    spec:
+      containers:
+        - name: model
+          image: qsm-api:latest
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn", "model_service.main:app", "--host", "0.0.0.0", "--port", "9000"]
+          env:
+            - name: PYTHONPATH
+              value: /app/src
+          ports:
+            - containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9000
+            initialDelaySeconds: 3
+            periodSeconds: 10

@@ -529,6 +529,8 @@ docker compose up -d
 ```bash
 # 示例：启动 API
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+# 如需使用 HTTP 模型推理后端，可同时启动模型服务
+python3 scripts/run_model_service.py
 ```
 
 ### 6.7 运行核心流程（示例）
@@ -1159,9 +1161,11 @@ CI 已内置：`.github/workflows/tests.yml`（push 到 `main` / PR 自动执行
 参考清单（已提供模板）：
 ```bash
 kubectl apply -f k8s/configmap.yaml
+kubectl apply -f k8s/deployment-model.yaml
 kubectl apply -f k8s/deployment-api.yaml
 kubectl apply -f k8s/deployment-worker.yaml
 kubectl apply -f k8s/service.yaml
+kubectl apply -f k8s/service-model.yaml
 ```
 
 ### 13.3 CI/CD（示例）
