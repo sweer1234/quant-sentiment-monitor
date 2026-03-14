@@ -242,7 +242,7 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     assert first_delivery["signature"] is not None
     assert first_delivery["can_retry"] is True
 
-    second_process = client.post("/api/v1/webhooks/queue/process?limit=20", headers=admin_headers)
+    second_process = client.post("/api/v1/webhooks/queue/process?limit=20&ignore_schedule=true", headers=admin_headers)
     assert second_process.status_code == 200
 
     delivered_after_process = client.get("/api/v1/webhooks/deliveries?status=delivered", headers=admin_headers)
@@ -269,8 +269,8 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     failing_id = failing_webhook.json()["subscription_id"]
     client.post("/api/v1/webhooks/dispatch-test", headers=admin_headers)
     # Process twice to make the failing webhook reach failed status.
-    client.post("/api/v1/webhooks/queue/process?limit=50", headers=admin_headers)
-    client.post("/api/v1/webhooks/queue/process?limit=50", headers=admin_headers)
+    client.post("/api/v1/webhooks/queue/process?limit=50&ignore_schedule=true", headers=admin_headers)
+    client.post("/api/v1/webhooks/queue/process?limit=50&ignore_schedule=true", headers=admin_headers)
     failed_deliveries = client.get(f"/api/v1/webhooks/deliveries?subscription_id={failing_id}&status=failed", headers=admin_headers)
     assert failed_deliveries.status_code == 200
     assert failed_deliveries.json()["total"] >= 1

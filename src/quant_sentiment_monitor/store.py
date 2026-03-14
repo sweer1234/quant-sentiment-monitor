@@ -949,7 +949,7 @@ class QuantStore:
             "requeued": requeued,
         }
 
-    def process_webhook_queue(self, *, limit: int = 50) -> dict[str, Any]:
+    def process_webhook_queue(self, *, limit: int = 50, ignore_schedule: bool = False) -> dict[str, Any]:
         processed = 0
         delivered = 0
         failed = 0
@@ -961,7 +961,7 @@ class QuantStore:
                 remaining_jobs.append(job)
                 continue
             scheduled_at = datetime.fromisoformat(str(job.get("scheduled_at")))
-            if scheduled_at > now:
+            if scheduled_at > now and not ignore_schedule:
                 remaining_jobs.append(job)
                 continue
 

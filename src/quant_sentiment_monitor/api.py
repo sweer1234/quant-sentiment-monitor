@@ -491,9 +491,10 @@ def retry_webhook_failures(
 @app.post("/api/v1/webhooks/queue/process")
 def process_webhook_queue(
     limit: int = Query(default=50, ge=1, le=500),
+    ignore_schedule: bool = Query(default=False),
     _: str = Depends(require_permission("webhooks.manage")),
 ) -> dict[str, Any]:
-    return store.process_webhook_queue(limit=limit)
+    return store.process_webhook_queue(limit=limit, ignore_schedule=ignore_schedule)
 
 
 @app.get("/api/v1/webhooks/stats")
