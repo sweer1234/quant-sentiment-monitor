@@ -3,124 +3,224 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>QSM 操作台</title>
+    <title>QSM 专业操作台</title>
     <link rel="stylesheet" href="/web/styles.css" />
   </head>
   <body>
-    <header class="header">
-      <h1>金融舆情监控操作台</h1>
-      <div id="sessionInfo" class="session-info">未登录</div>
-    </header>
-
-    <main class="container">
-      <section id="loginPanel" class="card">
-        <h2>登录</h2>
-        <form id="loginForm" class="grid-form">
+    <section id="loginPanel" class="login-shell">
+      <div class="login-card">
+        <h1>金融舆情监控操作台</h1>
+        <p class="sub-title">专业版前台 · 登录后进入多模块工作台</p>
+        <form id="loginForm" class="form-grid single">
           <label>用户名 <input id="loginUsername" value="demo" required /></label>
           <label>密码 <input id="loginPassword" type="password" value="demo123" required /></label>
           <button type="submit">登录</button>
         </form>
-        <p class="hint">内置账号：demo/demo123, adollman/dev123, sweer1234/dev123</p>
-      </section>
+        <p class="hint">测试账号：demo/demo123, adollman/dev123, sweer1234/dev123</p>
+      </div>
+    </section>
 
-      <section id="appPanel" class="hidden">
-        <nav class="tabs">
-          <button class="tab-btn active" data-tab="eventsTab">事件流</button>
-          <button class="tab-btn" data-tab="alertsTab">告警</button>
-          <button class="tab-btn" data-tab="sourcesTab">站点</button>
-          <button class="tab-btn" data-tab="manualTab">手工消息</button>
-          <button class="tab-btn" data-tab="profileTab">个人配置</button>
-          <button class="tab-btn" data-tab="adminTab">系统面板</button>
-        </nav>
+    <section id="appShell" class="app-shell hidden">
+      <aside class="sidebar">
+        <div class="brand">QSM</div>
+        <button class="nav-btn active" data-view="dashboardView">总览</button>
+        <button class="nav-btn" data-view="eventsView">事件中心</button>
+        <button class="nav-btn" data-view="alertsView">告警中心</button>
+        <button class="nav-btn" data-view="sourcesView">数据源管理</button>
+        <button class="nav-btn" data-view="manualView">手工消息</button>
+        <button class="nav-btn" data-view="usersView">用户与权限</button>
+        <button class="nav-btn admin-only" data-view="adminView">系统运维</button>
+      </aside>
 
-        <section id="eventsTab" class="tab card active">
-          <div class="section-header">
-            <h2>事件流</h2>
-            <button id="refreshEventsBtn">刷新</button>
+      <div class="workspace">
+        <header class="topbar">
+          <div class="topbar-left">
+            <strong id="breadcrumb">总览</strong>
+            <span id="envBadge" class="badge">ENV: dev</span>
           </div>
-          <div id="eventsList" class="list"></div>
-          <h3>事件接入</h3>
-          <form id="ingestForm" class="grid-form">
-            <label>来源ID <input id="ingestSource" value="federal_reserve" required /></label>
-            <label>标题 <input id="ingestTitle" required /></label>
-            <label>内容 <textarea id="ingestContent" rows="3" required></textarea></label>
-            <label>相关品种（逗号分隔） <input id="ingestInstruments" placeholder="DXY,UST10Y" /></label>
-            <button type="submit">提交事件</button>
-          </form>
-        </section>
-
-        <section id="alertsTab" class="tab card">
-          <div class="section-header">
-            <h2>告警</h2>
-            <button id="refreshAlertsBtn">刷新</button>
+          <div class="topbar-right">
+            <input id="globalSearchInput" placeholder="全局搜索事件/告警/来源..." />
+            <button id="globalSearchBtn">搜索</button>
+            <button id="logoutBtn">退出</button>
           </div>
-          <div id="alertsList" class="list"></div>
+        </header>
+
+        <section id="searchResultsBar" class="card hidden">
+          <div class="section-head"><h3>全局搜索结果</h3><button id="clearSearchBtn">清空</button></div>
+          <div id="searchResults" class="list compact"></div>
         </section>
 
-        <section id="sourcesTab" class="tab card">
-          <div class="section-header">
-            <h2>站点管理</h2>
-            <button id="refreshSourcesBtn">刷新</button>
-          </div>
-          <div id="sourcesList" class="list"></div>
-          <h3>更新站点</h3>
-          <form id="patchSourceForm" class="grid-form">
-            <label>source_id <input id="sourceIdInput" required /></label>
-            <label>enabled <input id="sourceEnabledInput" value="true" /></label>
-            <label>source_weight <input id="sourceWeightInput" value="0.8" /></label>
-            <button type="submit">提交更新</button>
-          </form>
-        </section>
+        <main class="content-area">
+          <section id="dashboardView" class="view active">
+            <div class="kpi-grid">
+              <div class="kpi-card"><span>事件总数</span><strong id="kpiEventsTotal">-</strong></div>
+              <div class="kpi-card"><span>P0 事件</span><strong id="kpiEventsP0">-</strong></div>
+              <div class="kpi-card"><span>活跃告警</span><strong id="kpiAlertsActive">-</strong></div>
+              <div class="kpi-card"><span>Webhook 队列</span><strong id="kpiWebhookQueue">-</strong></div>
+              <div class="kpi-card"><span>通知积压</span><strong id="kpiNotificationsQueued">-</strong></div>
+              <div class="kpi-card"><span>采集任务队列</span><strong id="kpiCollectorQueue">-</strong></div>
+            </div>
+            <div class="split-grid">
+              <div class="card">
+                <div class="section-head"><h3>最新事件</h3><button id="dashboardRefreshBtn">刷新</button></div>
+                <div id="dashboardEvents" class="list"></div>
+              </div>
+              <div class="card">
+                <div class="section-head"><h3>系统健康</h3></div>
+                <div id="dashboardHealth" class="mono"></div>
+              </div>
+            </div>
+          </section>
 
-        <section id="manualTab" class="tab card">
-          <h2>手工消息录入</h2>
-          <form id="manualForm" class="grid-form">
-            <label>标题 <input id="manualTitle" required /></label>
-            <label>内容 <textarea id="manualContent" rows="3" required></textarea></label>
-            <label>录入人ID <input id="manualOperatorId" value="ui_operator" required /></label>
-            <label>录入人角色 <input id="manualOperatorRole" value="analyst" required /></label>
-            <label>相关品种（逗号分隔） <input id="manualInstruments" /></label>
-            <button type="submit">创建消息</button>
-          </form>
-          <div id="manualResult" class="mono"></div>
-        </section>
+          <section id="eventsView" class="view">
+            <div class="card">
+              <div class="section-head"><h3>事件中心</h3></div>
+              <form id="eventsFilterForm" class="form-grid">
+                <label>市场 <input id="eventsFilterMarket" placeholder="fx/futures/..." /></label>
+                <label>最小分数 <input id="eventsFilterScore" type="number" min="0" max="100" value="0" /></label>
+                <label>关键词 <input id="eventsFilterKeyword" placeholder="关键词搜索标题" /></label>
+                <button type="submit">查询</button>
+                <button type="button" id="eventsExportBtn">导出JSON</button>
+              </form>
+              <div id="eventsTable" class="table"></div>
+            </div>
+            <div class="card">
+              <div class="section-head"><h3>事件接入</h3></div>
+              <form id="ingestForm" class="form-grid">
+                <label>来源ID <input id="ingestSource" value="federal_reserve" required /></label>
+                <label>标题 <input id="ingestTitle" required /></label>
+                <label class="wide">内容 <textarea id="ingestContent" rows="3" required></textarea></label>
+                <label>相关品种（逗号） <input id="ingestInstruments" placeholder="DXY,UST10Y" /></label>
+                <button type="submit">提交事件</button>
+              </form>
+            </div>
+          </section>
 
-        <section id="profileTab" class="tab card">
-          <h2>个人配置</h2>
-          <form id="prefsForm" class="grid-form">
-            <label>关键词（逗号分隔） <input id="prefKeywords" /></label>
-            <label>市场（逗号分隔） <input id="prefMarkets" placeholder="fx,futures" /></label>
-            <label>品种（逗号分隔） <input id="prefInstruments" placeholder="DXY,CL" /></label>
-            <label>最小告警级别
-              <select id="prefAlertLevel">
-                <option value="P0">P0</option>
-                <option value="P1">P1</option>
-                <option value="P2" selected>P2</option>
-              </select>
-            </label>
-            <button type="submit">保存配置</button>
-          </form>
-          <div id="profileResult" class="mono"></div>
-        </section>
+          <section id="alertsView" class="view">
+            <div class="card">
+              <div class="section-head">
+                <h3>告警中心</h3>
+                <div class="actions-inline">
+                  <select id="alertsStatusFilter">
+                    <option value="">全部</option>
+                    <option value="active">active</option>
+                    <option value="acked">acked</option>
+                    <option value="escalated">escalated</option>
+                    <option value="revoked">revoked</option>
+                  </select>
+                  <button id="alertsRefreshBtn">刷新</button>
+                  <button id="alertsEscalateBtn" class="admin-only">批量升级</button>
+                </div>
+              </div>
+              <div id="alertsTable" class="table"></div>
+            </div>
+          </section>
 
-        <section id="adminTab" class="tab card">
-          <div class="section-header">
-            <h2>系统面板</h2>
-            <button id="refreshAdminBtn">刷新</button>
-          </div>
-          <div class="actions">
-            <button id="processNotificationsBtn">处理通知</button>
-            <button id="processCollectorTasksBtn">处理采集任务</button>
-          </div>
-          <div id="adminInfo" class="mono"></div>
-        </section>
-      </section>
-    </main>
+          <section id="sourcesView" class="view">
+            <div class="card">
+              <div class="section-head">
+                <h3>数据源管理</h3>
+                <div class="actions-inline">
+                  <button id="sourcesRefreshBtn">刷新</button>
+                  <button id="sourcesReloadBtn" class="admin-only">重载配置</button>
+                </div>
+              </div>
+              <div id="sourcesTable" class="table"></div>
+            </div>
+            <div class="card">
+              <h3>编辑来源</h3>
+              <form id="patchSourceForm" class="form-grid">
+                <label>source_id <input id="sourceIdInput" required /></label>
+                <label>enabled
+                  <select id="sourceEnabledInput">
+                    <option value="true">true</option>
+                    <option value="false">false</option>
+                  </select>
+                </label>
+                <label>source_weight <input id="sourceWeightInput" value="0.8" type="number" step="0.01" /></label>
+                <button type="submit">保存</button>
+              </form>
+            </div>
+          </section>
 
-    <footer class="footer">
-      <div id="toast"></div>
-    </footer>
+          <section id="manualView" class="view">
+            <div class="split-grid">
+              <div class="card">
+                <h3>手工消息录入</h3>
+                <form id="manualForm" class="form-grid">
+                  <label>标题 <input id="manualTitle" required /></label>
+                  <label class="wide">内容 <textarea id="manualContent" rows="3" required></textarea></label>
+                  <label>录入人ID <input id="manualOperatorId" value="ui_operator" required /></label>
+                  <label>录入人角色 <input id="manualOperatorRole" value="analyst" required /></label>
+                  <label>相关品种（逗号） <input id="manualInstruments" /></label>
+                  <button type="submit">创建消息</button>
+                </form>
+                <div id="manualResult" class="mono"></div>
+              </div>
+              <div class="card">
+                <div class="section-head">
+                  <h3>手工消息列表</h3>
+                  <button id="manualRefreshBtn">刷新</button>
+                </div>
+                <div id="manualTable" class="table"></div>
+              </div>
+            </div>
+          </section>
 
+          <section id="usersView" class="view">
+            <div class="card">
+              <h3>个人偏好</h3>
+              <form id="prefsForm" class="form-grid">
+                <label>关键词（逗号） <input id="prefKeywords" /></label>
+                <label>市场（逗号） <input id="prefMarkets" placeholder="fx,futures" /></label>
+                <label>品种（逗号） <input id="prefInstruments" placeholder="DXY,CL" /></label>
+                <label>最小告警级别
+                  <select id="prefAlertLevel">
+                    <option value="P0">P0</option>
+                    <option value="P1">P1</option>
+                    <option value="P2" selected>P2</option>
+                  </select>
+                </label>
+                <button type="submit">保存配置</button>
+              </form>
+              <div id="profileResult" class="mono"></div>
+            </div>
+            <div class="card admin-only">
+              <div class="section-head"><h3>用户计划与配额</h3><button id="usersRefreshBtn">刷新</button></div>
+              <div id="usersTable" class="table"></div>
+            </div>
+          </section>
+
+          <section id="adminView" class="view admin-only">
+            <div class="card">
+              <div class="section-head"><h3>系统运维面板</h3><button id="adminRefreshBtn">刷新</button></div>
+              <div class="actions-inline">
+                <button id="processNotificationsBtn">处理通知</button>
+                <button id="retryNotificationsBtn">重试失败通知</button>
+                <button id="processCollectorTasksBtn">处理采集任务</button>
+              </div>
+              <div id="adminInfo" class="mono"></div>
+            </div>
+            <div class="card">
+              <div class="section-head"><h3>审计日志</h3><button id="auditRefreshBtn">刷新</button></div>
+              <div id="auditTable" class="table"></div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </section>
+
+    <section id="detailDrawer" class="drawer hidden">
+      <div class="drawer-panel">
+        <div class="section-head">
+          <h3 id="drawerTitle">详情</h3>
+          <button id="drawerCloseBtn">关闭</button>
+        </div>
+        <div id="drawerContent" class="mono"></div>
+      </div>
+    </section>
+
+    <footer class="footer"><div id="toast"></div></footer>
     <script src="/web/app.js"></script>
   </body>
 </html>

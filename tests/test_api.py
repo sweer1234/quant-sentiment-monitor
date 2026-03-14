@@ -140,6 +140,9 @@ def test_source_import_delete_and_signal_thresholds() -> None:
     put_plan = client.put("/api/v1/admin/quotas/users/demo?plan=pro", headers=admin_headers)
     assert put_plan.status_code == 200
     assert put_plan.json()["plan"] == "pro"
+    admin_users = client.get("/api/v1/admin/users", headers=admin_headers)
+    assert admin_users.status_code == 200
+    assert admin_users.json()["total"] >= 1
     restore_plan = client.put("/api/v1/admin/quotas/users/demo?plan=basic", headers=admin_headers)
     assert restore_plan.status_code == 200
 
@@ -231,6 +234,7 @@ def test_impact_batch() -> None:
 
 
 def test_manual_message_flow() -> None:
+    analyst_headers = _login_headers(username="demo", password="demo123")
     create = client.post(
         "/api/v1/manual/messages",
         headers=TOKEN,
@@ -319,6 +323,9 @@ def test_manual_message_flow() -> None:
     )
     assert batch_create.status_code == 200
     assert batch_create.json()["created"] == 2
+    listed = client.get("/api/v1/manual/messages?limit=20", headers=analyst_headers)
+    assert listed.status_code == 200
+    assert listed.json()["total"] >= 1
 
 
 def test_user_topic_portfolio_alert_and_sla_flow() -> None:

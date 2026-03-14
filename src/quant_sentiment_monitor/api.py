@@ -537,6 +537,16 @@ def get_manual_message(manual_message_id: str) -> dict[str, Any]:
     return record.model_dump(mode="json")
 
 
+@app.get("/api/v1/manual/messages")
+def list_manual_messages(
+    status: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    _: str = Depends(require_permission("events.ingest")),
+) -> dict[str, Any]:
+    rows = store.list_manual_messages(status=status, limit=limit)
+    return {"total": len(rows), "rows": rows}
+
+
 @app.post("/api/v1/manual/messages/{manual_message_id}/review")
 def review_manual_message(
     manual_message_id: str,
@@ -795,6 +805,15 @@ def admin_set_user_plan(
         return store.set_user_plan(username=username, plan=plan, actor=actor)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/admin/users")
+def admin_users(
+    period: str | None = Query(default=None),
+    _: str = Depends(require_permission("admin.state")),
+) -> dict[str, Any]:
+    rows = store.admin_users_summary(period=period)
+    return {"total": len(rows), "rows": rows}
 
 
 @app.get("/api/v1/metrics/summary")

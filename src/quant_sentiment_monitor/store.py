@@ -912,6 +912,22 @@ class QuantStore:
                 rows.append({"ok": False, "error": str(exc)})
         return {"status": "ok", "created": created, "failed": len(requests) - created, "results": rows}
 
+    def list_manual_messages(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        items = sorted(self.manual_messages.values(), key=lambda item: item.updated_at, reverse=True)
+        for item in items:
+            if status and item.status != status:
+                continue
+            rows.append(item.model_dump(mode="json"))
+            if len(rows) >= limit:
+                break
+        return rows
+
     def submit_manual_message(self, manual_message_id: str, *, actor: str = "system") -> ManualMessageRecord | None:
         record = self.manual_messages.get(manual_message_id)
         if not record:
@@ -1702,6 +1718,23 @@ class QuantStore:
             "quota": quota,
             "usage": usage,
         }
+
+    def admin_users_summary(self, *, period: str | None = None) -> list[dict[str, Any]]:
+        period_value = period or self._current_period()
+        rows = []
+        for username, info in sorted(self.users.items(), key=lambda kv: kv[0]):
+            quota_status = self.user_quota_status(username=username, period=period_value)
+            rows.append(
+                {
+                    "username": username,
+                    "role": info.get("role", "analyst"),
+                    "plan": quota_status.get("plan"),
+                    "period": period_value,
+                    "usage": quota_status.get("usage"),
+                    "quota": quota_status.get("quota"),
+                }
+            )
+        return rows
 
     def inference_status(self) -> dict[str, Any]:
         return {
