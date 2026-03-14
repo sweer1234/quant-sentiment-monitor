@@ -46,6 +46,45 @@ def test_sources_list_and_patch() -> None:
     assert patched.json()["source_id"] == "new_source_for_test"
 
 
+def test_source_version_history_and_rollback() -> None:
+    admin_headers = _login_headers(username="sweer1234", password="dev123")
+    source_id = "source_version_demo"
+    first_patch = client.patch(
+        f"/api/v1/sources/{source_id}",
+        headers=admin_headers,
+        json={"enabled": True, "source_weight": 0.21, "region": "US"},
+    )
+    assert first_patch.status_code == 200
+    second_patch = client.patch(
+        f"/api/v1/sources/{source_id}",
+        headers=admin_headers,
+        json={"source_weight": 0.93, "timeliness_weight": 0.88},
+    )
+    assert second_patch.status_code == 200
+    assert second_patch.json()["source_weight"] == 0.93
+
+    versions = client.get(f"/api/v1/sources/{source_id}/versions?limit=20", headers=admin_headers)
+    assert versions.status_code == 200
+    payload = versions.json()
+    assert payload["total"] >= 2
+    assert len(payload["versions"]) >= 2
+    latest_version = payload["versions"][0]
+    assert "source_weight" in latest_version["changed_fields"]
+    rollback_version_id = latest_version["version_id"]
+
+    rollback = client.post(
+        f"/api/v1/sources/{source_id}/rollback?version_id={rollback_version_id}",
+        headers=admin_headers,
+    )
+    assert rollback.status_code == 200
+    assert rollback.json()["source_weight"] == 0.21
+    assert rollback.json()["effective_source_weight"] >= 0
+
+    versions_after = client.get(f"/api/v1/sources/{source_id}/versions?limit=5", headers=admin_headers)
+    assert versions_after.status_code == 200
+    assert versions_after.json()["total"] >= payload["total"] + 1
+
+
 def test_event_feed_and_impact() -> None:
     feed = client.get("/api/v1/events/feed?page=1&page_size=5")
     assert feed.status_code == 200
@@ -442,6 +481,13 @@ def test_auth_and_permission_denied_paths() -> None:
     assert denied_webhook_dlq.status_code == 403
     denied_webhook_replay = client.post("/api/v1/webhooks/dlq/replay", headers=analyst_headers)
     assert denied_webhook_replay.status_code == 403
+    denied_source_versions = client.get("/api/v1/sources/federal_reserve/versions", headers=analyst_headers)
+    assert denied_source_versions.status_code == 403
+    denied_source_rollback = client.post(
+        "/api/v1/sources/federal_reserve/rollback?version_id=sv_unknown",
+        headers=analyst_headers,
+    )
+    assert denied_source_rollback.status_code == 403
     denied_webhook_pause = client.post("/api/v1/webhooks/queue/pause", headers=analyst_headers)
     assert denied_webhook_pause.status_code == 403
     denied_webhook_resume = client.post("/api/v1/webhooks/queue/resume", headers=analyst_headers)

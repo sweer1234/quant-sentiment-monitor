@@ -257,17 +257,17 @@ def list_sources(
 def patch_source(
     source_id: str,
     request: SourcePatchRequest,
-    _: str = Depends(require_public_or_permission("sources.write")),
+    actor: str = Depends(require_public_or_permission("sources.write")),
 ) -> dict[str, Any]:
-    return store.patch_source(source_id=source_id, patch_data=request.model_dump())
+    return store.patch_source(source_id=source_id, patch_data=request.model_dump(), actor=actor)
 
 
 @app.post("/api/v1/sources/batch")
 def batch_sources(
     request: SourcesBatchRequest,
-    _: str = Depends(require_public_or_permission("sources.write")),
+    actor: str = Depends(require_public_or_permission("sources.write")),
 ) -> dict[str, Any]:
-    return store.batch_update_sources([item.model_dump() for item in request.operations])
+    return store.batch_update_sources([item.model_dump() for item in request.operations], actor=actor)
 
 
 @app.post("/api/v1/sources/reload")
@@ -283,6 +283,28 @@ def export_sources(format: str = Query(default="yaml")) -> PlainTextResponse:
 @app.get("/api/v1/sources/{source_id}/compliance")
 def source_compliance(source_id: str) -> dict[str, Any]:
     return store.source_compliance(source_id)
+
+
+@app.get("/api/v1/sources/{source_id}/versions")
+def source_versions(
+    source_id: str,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=500),
+    _: str = Depends(require_permission("sources.write")),
+) -> dict[str, Any]:
+    return store.list_source_versions(source_id=source_id, offset=offset, limit=limit)
+
+
+@app.post("/api/v1/sources/{source_id}/rollback")
+def rollback_source(
+    source_id: str,
+    version_id: str = Query(...),
+    actor: str = Depends(require_permission("sources.write")),
+) -> dict[str, Any]:
+    result = store.rollback_source_version(source_id=source_id, version_id=version_id, actor=actor)
+    if not result:
+        raise HTTPException(status_code=404, detail="source version not found")
+    return result
 
 
 @app.post("/api/v1/manual/messages")

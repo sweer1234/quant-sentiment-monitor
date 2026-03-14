@@ -74,6 +74,7 @@ class QuantStore:
         self.ingest_stats: dict[str, int] = {"total": 0, "deduplicated": 0, "accepted": 0}
         self.request_cache: dict[str, dict[str, Any]] = {}
         self.audit_logs: list[dict[str, Any]] = []
+        self.source_versions: dict[str, list[dict[str, Any]]] = {}
         self.webhook_subscriptions: dict[str, dict[str, Any]] = {}
         self.webhook_deliveries: list[dict[str, Any]] = []
         self.webhook_queue: list[dict[str, Any]] = []
@@ -154,6 +155,7 @@ class QuantStore:
             "ingest_stats": self.ingest_stats,
             "request_cache": self.request_cache,
             "audit_logs": self.audit_logs,
+            "source_versions": self.source_versions,
             "webhook_subscriptions": list(self.webhook_subscriptions.values()),
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,
@@ -187,6 +189,11 @@ class QuantStore:
             self.ingest_stats = dict(payload.get("ingest_stats", {"total": 0, "deduplicated": 0, "accepted": 0}))
             self.request_cache = dict(payload.get("request_cache", {}))
             self.audit_logs = list(payload.get("audit_logs", []))
+            self.source_versions = {
+                str(key): list(value)
+                for key, value in dict(payload.get("source_versions", {})).items()
+                if isinstance(value, list)
+            }
             self.webhook_subscriptions = {
                 item["subscription_id"]: item for item in payload.get("webhook_subscriptions", []) if "subscription_id" in item
             }
@@ -509,8 +516,48 @@ class QuantStore:
             result.append(enriched)
         return result
 
-    def patch_source(self, source_id: str, patch_data: dict[str, Any]) -> dict[str, Any]:
+    def _record_source_version(
+        self,
+        *,
+        source_id: str,
+        before: dict[str, Any] | None,
+        after: dict[str, Any] | None,
+        actor: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        changed_fields = set()
+        before_obj = before or {}
+        after_obj = after or {}
+        for key in set(before_obj.keys()) | set(after_obj.keys()):
+            if before_obj.get(key) != after_obj.get(key):
+                changed_fields.add(key)
+        version = {
+            "version_id": f"sv_{uuid4().hex[:10]}",
+            "source_id": source_id,
+            "actor": actor,
+            "reason": reason,
+            "changed_fields": sorted(changed_fields),
+            "before": deepcopy(before) if before is not None else None,
+            "after": deepcopy(after) if after is not None else None,
+            "created_at": now_utc().isoformat(),
+        }
+        history = self.source_versions.setdefault(source_id, [])
+        history.append(version)
+        max_items = 200
+        if len(history) > max_items:
+            self.source_versions[source_id] = history[-max_items:]
+        return deepcopy(version)
+
+    def patch_source(
+        self,
+        source_id: str,
+        patch_data: dict[str, Any],
+        *,
+        actor: str = "system",
+        reason: str = "patch_source",
+    ) -> dict[str, Any]:
         with self._lock:
+            before = deepcopy(self._source_by_id.get(source_id))
             if source_id not in self._source_by_id:
                 self._source_by_id[source_id] = {
                     "source_id": source_id,
@@ -528,10 +575,16 @@ class QuantStore:
             self._source_by_id[source_id].update({k: v for k, v in patch_data.items() if v is not None})
             source = deepcopy(self._source_by_id[source_id])
             source["effective_source_weight"] = round(calculate_effective_source_weight(source), 4)
+            self._record_source_version(source_id=source_id, before=before, after=source, actor=actor, reason=reason)
+            self._audit(
+                "source.patch",
+                actor,
+                {"source_id": source_id, "reason": reason, "changed_fields": [k for k, v in patch_data.items() if v is not None]},
+            )
             self._persist_state()
             return source
 
-    def batch_update_sources(self, operations: list[dict[str, Any]]) -> dict[str, Any]:
+    def batch_update_sources(self, operations: list[dict[str, Any]], *, actor: str = "system") -> dict[str, Any]:
         updated: list[dict[str, Any]] = []
         for operation in operations:
             source_id = operation.get("source_id")
@@ -539,11 +592,57 @@ class QuantStore:
                 continue
             op = operation.get("op")
             if op == "disable":
-                updated.append(self.patch_source(source_id, {"enabled": False}))
+                updated.append(self.patch_source(source_id, {"enabled": False}, actor=actor, reason="batch_disable"))
                 continue
             payload = {k: v for k, v in operation.items() if k not in {"op", "source_id"}}
-            updated.append(self.patch_source(source_id, payload))
+            updated.append(self.patch_source(source_id, payload, actor=actor, reason="batch_upsert"))
+        self._audit("source.batch_update", actor, {"updated": len(updated), "operations": len(operations)})
+        self._persist_state()
         return {"updated": len(updated), "sources": updated}
+
+    def list_source_versions(self, source_id: str, *, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+        rows = [deepcopy(item) for item in reversed(self.source_versions.get(source_id, []))]
+        total = len(rows)
+        if offset > 0:
+            rows = rows[offset:]
+        rows = rows[:limit]
+        return {"source_id": source_id, "total": total, "offset": offset, "limit": limit, "versions": rows}
+
+    def rollback_source_version(self, source_id: str, version_id: str, *, actor: str) -> dict[str, Any] | None:
+        history = self.source_versions.get(source_id, [])
+        target = next((item for item in history if item.get("version_id") == version_id), None)
+        if not target:
+            return None
+        rollback_to = deepcopy(target.get("before"))
+        before = deepcopy(self._source_by_id.get(source_id))
+        if rollback_to is None:
+            self._source_by_id.pop(source_id, None)
+            self.sources = [item for item in self.sources if item.get("source_id") != source_id]
+            after = None
+            result = {"source_id": source_id, "deleted": True}
+        else:
+            self._source_by_id[source_id] = rollback_to
+            replaced = False
+            for idx, item in enumerate(self.sources):
+                if item.get("source_id") == source_id:
+                    self.sources[idx] = self._source_by_id[source_id]
+                    replaced = True
+                    break
+            if not replaced:
+                self.sources.append(self._source_by_id[source_id])
+            result = deepcopy(self._source_by_id[source_id])
+            result["effective_source_weight"] = round(calculate_effective_source_weight(result), 4)
+            after = deepcopy(self._source_by_id[source_id])
+        self._record_source_version(
+            source_id=source_id,
+            before=before,
+            after=after,
+            actor=actor,
+            reason=f"rollback:{version_id}",
+        )
+        self._audit("source.rollback", actor, {"source_id": source_id, "version_id": version_id})
+        self._persist_state()
+        return result
 
     def export_sources(self, fmt: str = "yaml") -> str:
         payload = {"sources": self.sources}
@@ -1851,6 +1950,7 @@ class QuantStore:
             "audit_total": len(self.audit_logs),
             "ingest_stats": self.ingest_stats,
             "request_cache_size": len(self.request_cache),
+            "source_versions_total": sum(len(items) for items in self.source_versions.values()),
             "webhook": webhook,
         }
 
@@ -1866,6 +1966,7 @@ class QuantStore:
             "feedback_records": self.feedback_records,
             "ingest_stats": self.ingest_stats,
             "request_cache": self.request_cache,
+            "source_versions": self.source_versions,
             "webhook_subscriptions": list(self.webhook_subscriptions.values()),
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,
@@ -1885,6 +1986,7 @@ class QuantStore:
             self.user_topic_subscriptions = {}
             self.feedback_records = []
             self.ingest_stats = {"total": 0, "deduplicated": 0, "accepted": 0}
+            self.source_versions = {}
             self.webhook_subscriptions = {}
             self.webhook_deliveries = []
             self.webhook_queue = []
@@ -1938,6 +2040,10 @@ class QuantStore:
         for field in ("total", "deduplicated", "accepted"):
             self.ingest_stats[field] = int(incoming_stats.get(field, self.ingest_stats.get(field, 0)))
         self.request_cache.update(dict(payload.get("request_cache", {})))
+        for source_id, versions in dict(payload.get("source_versions", {})).items():
+            if not isinstance(versions, list):
+                continue
+            self.source_versions[str(source_id)] = list(versions)
 
         self._audit(
             "admin.state.import",
@@ -1965,6 +2071,7 @@ class QuantStore:
         self.feedback_records = []
         self.ingest_stats = {"total": 0, "deduplicated": 0, "accepted": 0}
         self.request_cache = {}
+        self.source_versions = {}
         self.webhook_subscriptions = {}
         self.webhook_deliveries = []
         self.webhook_queue = []
