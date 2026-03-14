@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -83,6 +84,42 @@ def test_source_version_history_and_rollback() -> None:
     versions_after = client.get(f"/api/v1/sources/{source_id}/versions?limit=5", headers=admin_headers)
     assert versions_after.status_code == 200
     assert versions_after.json()["total"] >= payload["total"] + 1
+
+
+def test_source_import_delete_and_signal_thresholds() -> None:
+    admin_headers = _login_headers(username="sweer1234", password="dev123")
+    import_resp = client.post(
+        "/api/v1/sources/import?merge=true",
+        headers=admin_headers,
+        json={
+            "sources": [
+                {
+                    "source_id": "import_demo_source",
+                    "display_name": "Import Demo",
+                    "enabled": True,
+                    "url": "https://example.com",
+                    "source_weight": 0.8,
+                }
+            ]
+        },
+    )
+    assert import_resp.status_code == 200
+    assert import_resp.json()["imported"] >= 1
+
+    thresholds_before = client.get("/api/v1/signals/thresholds", headers=admin_headers)
+    assert thresholds_before.status_code == 200
+    put_thresholds = client.put(
+        "/api/v1/signals/thresholds",
+        headers=admin_headers,
+        json={"buy_net_threshold": 15, "sell_net_threshold": -15},
+    )
+    assert put_thresholds.status_code == 200
+    assert put_thresholds.json()["buy_net_threshold"] == 15
+    assert put_thresholds.json()["sell_net_threshold"] == -15
+
+    delete_resp = client.delete("/api/v1/sources/import_demo_source", headers=admin_headers)
+    assert delete_resp.status_code == 200
+    assert delete_resp.json()["status"] == "deleted"
 
 
 def test_event_feed_and_impact() -> None:
@@ -183,6 +220,30 @@ def test_manual_message_flow() -> None:
     assert draft_publish.status_code == 200
     assert draft_publish.json()["status"] == "published"
     assert draft_publish.json()["linked_event_id"] is not None
+
+    batch_create = client.post(
+        "/api/v1/manual/messages/batch",
+        headers=TOKEN,
+        json={
+            "as_draft": True,
+            "messages": [
+                {
+                    "title": "批量线索1",
+                    "content": "批量导入测试1",
+                    "operator_id": "u_batch_1",
+                    "operator_role": "analyst",
+                },
+                {
+                    "title": "批量线索2",
+                    "content": "批量导入测试2",
+                    "operator_id": "u_batch_2",
+                    "operator_role": "analyst",
+                },
+            ],
+        },
+    )
+    assert batch_create.status_code == 200
+    assert batch_create.json()["created"] == 2
 
 
 def test_user_topic_portfolio_alert_and_sla_flow() -> None:
@@ -423,6 +484,25 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     assert resumed_stats.status_code == 200
     assert resumed_stats.json()["queue_paused"] is False
 
+    notifications = client.get("/api/v1/notifications/outbox?limit=20", headers=admin_headers)
+    assert notifications.status_code == 200
+    assert notifications.json()["total"] >= 1
+    process_notifications = client.post("/api/v1/notifications/process?limit=20", headers=admin_headers)
+    assert process_notifications.status_code == 200
+    assert process_notifications.json()["processed"] >= 0
+
+    dashboard = client.get("/dashboard")
+    assert dashboard.status_code == 200
+    assert "金融舆情事件流看板" in dashboard.text
+    metrics = client.get("/metrics")
+    assert metrics.status_code == 200
+    assert "qsm_events_total" in metrics.text
+
+    with patch("quant_sentiment_monitor.collector._fetch_url", return_value=("<rss><channel><item><title>Collector item</title><description>desc</description></item></channel></rss>", None)):
+        collector_run = client.post("/api/v1/collector/run-once?limit=2&retries=0", headers=admin_headers)
+    assert collector_run.status_code == 200
+    assert collector_run.json()["status"] == "ok"
+
     delete_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{webhook_id}", headers=admin_headers)
     assert delete_webhook.status_code == 200
     delete_failing_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{failing_id}", headers=admin_headers)
@@ -467,6 +547,12 @@ def test_auth_and_permission_denied_paths() -> None:
         json={"action": "approve"},
     )
     assert denied_review.status_code == 403
+    denied_manual_batch = client.post(
+        "/api/v1/manual/messages/batch",
+        headers=analyst_headers,
+        json={"as_draft": True, "messages": []},
+    )
+    assert denied_manual_batch.status_code == 401
     denied_publish = client.post(f"/api/v1/manual/messages/{mm_id}/publish", headers=analyst_headers)
     assert denied_publish.status_code == 403
     denied_reevaluate = client.post(f"/api/v1/manual/messages/{mm_id}/re-evaluate", headers=analyst_headers)
@@ -536,6 +622,10 @@ def test_auth_and_permission_denied_paths() -> None:
     assert denied_audit.status_code == 403
     denied_metrics = client.get("/api/v1/metrics/summary", headers=analyst_headers)
     assert denied_metrics.status_code == 403
+    denied_notifications = client.get("/api/v1/notifications/outbox", headers=analyst_headers)
+    assert denied_notifications.status_code == 403
+    denied_collector = client.post("/api/v1/collector/run-once", headers=trader_headers)
+    assert denied_collector.status_code == 403
 
     # Missing token should fail.
     no_token = client.get("/api/v1/users/me")

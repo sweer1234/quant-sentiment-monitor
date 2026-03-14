@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  qsm-api:
+    build: .
+    container_name: qsm-api
+    ports:
+      - "8000:8000"
+    environment:
+      QSM_APP_NAME: quant-sentiment-monitor
+      QSM_ENV: dev
+      QSM_PUBLIC_API_TOKEN: dev-public-token
+      QSM_STATE_PATH: data/state.json
+    volumes:
+      - ./data:/app/data
+      - ./configs:/app/configs
+

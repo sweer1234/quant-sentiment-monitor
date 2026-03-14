@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
+from fastapi.responses import HTMLResponse
 from fastapi.responses import PlainTextResponse
 
 from .models import (
@@ -18,10 +19,12 @@ from .models import (
     ImpactBatchRequest,
     ImpactBatchResponse,
     LoginRequest,
+    ManualMessageBatchRequest,
     ManualMessageCreateRequest,
     ManualMessageReviewRequest,
     PortfolioImpactRequest,
     SentimentResponse,
+    SignalThresholdsRequest,
     SignalResponse,
     SourcePatchRequest,
     SourcesBatchRequest,
@@ -31,6 +34,7 @@ from .models import (
 )
 from .settings import Settings
 from .store import QuantStore
+from .collector import run_collection_once
 
 
 settings = Settings()
@@ -95,6 +99,67 @@ def root() -> dict[str, str]:
     }
 
 
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard() -> HTMLResponse:
+    html = """
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Quant Sentiment Monitor</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 8px 0; }
+    .meta { color: #666; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h2>金融舆情事件流看板（简版）</h2>
+  <p>自动刷新最近事件，适合本地验收。</p>
+  <div id="events"></div>
+  <script>
+    async function load() {
+      const res = await fetch('/api/v1/events/feed?page=1&page_size=20');
+      const data = await res.json();
+      const box = document.getElementById('events');
+      box.innerHTML = '';
+      for (const e of data.events || []) {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.innerHTML = `<b>${e.title}</b>
+          <div class="meta">级别: ${e.importance_level} | 分数: ${e.importance_score} | 市场: ${(e.impacted_markets || []).join(', ')}</div>
+          <div class="meta">Top标的: ${(e.top_impacted_instruments || []).join(', ')}</div>`;
+        box.appendChild(div);
+      }
+    }
+    load();
+    setInterval(load, 10000);
+  </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
+
+
+@app.get("/metrics")
+def metrics_text() -> PlainTextResponse:
+    summary = store.metrics_summary()
+    webhook = summary.get("webhook", {})
+    rows = [
+        "# HELP qsm_events_total total events",
+        "# TYPE qsm_events_total gauge",
+        f"qsm_events_total {summary.get('events_total', 0)}",
+        "# HELP qsm_alerts_total total alerts",
+        "# TYPE qsm_alerts_total gauge",
+        f"qsm_alerts_total {summary.get('alerts_total', 0)}",
+        f"qsm_alerts_active {summary.get('alerts_active', 0)}",
+        f"qsm_webhook_queue_size {webhook.get('queue_size', 0)}",
+        f"qsm_webhook_dlq_size {webhook.get('dlq_size', 0)}",
+        f"qsm_notifications_queued {summary.get('notifications_queued', 0)}",
+    ]
+    return PlainTextResponse("\n".join(rows) + "\n")
+
+
 @app.get("/api/v1/health")
 def health() -> dict[str, Any]:
     return {
@@ -140,6 +205,19 @@ def get_signals(symbol: str = Query(...), interval: str = Query("1m")) -> Signal
     )
 
 
+@app.get("/api/v1/signals/thresholds")
+def get_signal_thresholds(_: str = Depends(get_current_user)) -> dict[str, Any]:
+    return store.signal_thresholds
+
+
+@app.put("/api/v1/signals/thresholds")
+def put_signal_thresholds(
+    request: SignalThresholdsRequest,
+    actor: str = Depends(require_permission("alerts.write")),
+) -> dict[str, Any]:
+    return store.update_signal_thresholds(request.model_dump(), actor=actor)
+
+
 @app.get("/api/v1/events/{event_id}/impact")
 def get_event_impact(event_id: str) -> dict[str, Any]:
     event = store.events.get(event_id)
@@ -176,6 +254,15 @@ def batch_ingest_events(
         payloads=[item.model_dump(mode="json") for item in request.events],
         request_id=request.request_id,
     )
+
+
+@app.post("/api/v1/collector/run-once")
+def collector_run_once(
+    limit: int = Query(default=20, ge=1, le=200),
+    retries: int = Query(default=2, ge=0, le=5),
+    _: str = Depends(require_permission("admin.state")),
+) -> dict[str, Any]:
+    return run_collection_once(store=store, limit=limit, retries=retries)
 
 
 @app.get("/api/v1/events/feed", response_model=EventFeedResponse)
@@ -270,6 +357,17 @@ def batch_sources(
     return store.batch_update_sources([item.model_dump() for item in request.operations], actor=actor)
 
 
+@app.delete("/api/v1/sources/{source_id}")
+def delete_source(
+    source_id: str,
+    actor: str = Depends(require_permission("sources.write")),
+) -> dict[str, Any]:
+    ok = store.delete_source(source_id=source_id, actor=actor)
+    if not ok:
+        raise HTTPException(status_code=404, detail="source not found")
+    return {"source_id": source_id, "status": "deleted"}
+
+
 @app.post("/api/v1/sources/reload")
 def reload_sources(_: str = Depends(require_public_or_permission("sources.write"))) -> dict[str, Any]:
     return store.reload_configs()
@@ -278,6 +376,18 @@ def reload_sources(_: str = Depends(require_public_or_permission("sources.write"
 @app.get("/api/v1/sources/export")
 def export_sources(format: str = Query(default="yaml")) -> PlainTextResponse:
     return PlainTextResponse(store.export_sources(fmt=format))
+
+
+@app.post("/api/v1/sources/import")
+def import_sources(
+    payload: dict[str, Any],
+    merge: bool = Query(default=True),
+    actor: str = Depends(require_permission("sources.write")),
+) -> dict[str, Any]:
+    rows = payload.get("sources", [])
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=422, detail="sources must be list")
+    return store.import_sources(rows=rows, actor=actor, merge=merge)
 
 
 @app.get("/api/v1/sources/{source_id}/compliance")
@@ -318,6 +428,11 @@ def create_manual_message(request: ManualMessageCreateRequest, _: None = Depends
         raise HTTPException(status_code=422, detail=f"missing required fields: {','.join(missing)}")
     record = store.create_manual_message(request)
     return record.model_dump(mode="json")
+
+
+@app.post("/api/v1/manual/messages/batch")
+def create_manual_message_batch(request: ManualMessageBatchRequest, _: None = Depends(require_token)) -> dict[str, Any]:
+    return store.batch_create_manual_messages(request.messages, as_draft=request.as_draft)
 
 
 @app.post("/api/v1/manual/messages/draft")
@@ -507,6 +622,14 @@ def event_credibility(event_id: str) -> dict[str, Any]:
     return result
 
 
+@app.get("/api/v1/events/{event_id}/features")
+def event_features(event_id: str) -> dict[str, Any]:
+    result = store.event_features(event_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="event not found")
+    return result
+
+
 @app.post("/api/v1/feedback/events/{event_id}")
 def event_feedback(
     event_id: str,
@@ -516,6 +639,25 @@ def event_feedback(
     if event_id not in store.events:
         raise HTTPException(status_code=404, detail="event not found")
     return store.add_feedback(username=username, event_id=event_id, payload=request.model_dump())
+
+
+@app.get("/api/v1/notifications/outbox")
+def notifications_outbox(
+    channel: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    _: str = Depends(require_permission("alerts.write")),
+) -> dict[str, Any]:
+    rows = store.list_notifications(channel=channel, status=status, limit=limit)
+    return {"total": len(rows), "rows": rows}
+
+
+@app.post("/api/v1/notifications/process")
+def process_notifications(
+    limit: int = Query(default=100, ge=1, le=500),
+    _: str = Depends(require_permission("alerts.write")),
+) -> dict[str, Any]:
+    return store.process_notifications(limit=limit)
 
 
 @app.get("/api/v1/billing/usage")

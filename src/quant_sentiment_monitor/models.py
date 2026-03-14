@@ -38,6 +38,9 @@ class Event(BaseModel):
     impacts: list[ImpactItem]
     credibility_level: Literal["official", "verified", "rumor"] = "verified"
     evidence: list[str] = Field(default_factory=list)
+    sentiment: Literal["positive", "neutral", "negative"] = "neutral"
+    entities: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
 
 
 class ManualMessageCreateRequest(BaseModel):
@@ -49,6 +52,11 @@ class ManualMessageCreateRequest(BaseModel):
     operator_id: str
     operator_role: str
     attachments: list[str] = Field(default_factory=list)
+
+
+class ManualMessageBatchRequest(BaseModel):
+    as_draft: bool = False
+    messages: list[ManualMessageCreateRequest]
 
 
 class ManualMessageReviewRequest(BaseModel):
@@ -188,6 +196,11 @@ class AlertPolicyUpdateRequest(BaseModel):
     cooldown_minutes: dict[str, int] | None = None
     channels_order: list[str] | None = None
     allow_revoke: bool | None = None
+
+
+class SignalThresholdsRequest(BaseModel):
+    buy_net_threshold: float = Field(default=12.0, ge=0.0, le=100.0)
+    sell_net_threshold: float = Field(default=-12.0, ge=-100.0, le=0.0)
 
 
 class FeedbackRequest(BaseModel):

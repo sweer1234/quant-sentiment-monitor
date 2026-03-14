@@ -38,22 +38,40 @@ def evaluate(bars: list[Bar]) -> dict[str, float]:
     pnl = 0.0
     wins = 0
     trades = 0
+    equity = [0.0]
+    returns = []
     for prev, cur in zip(bars, bars[1:]):
         ret = cur.close - prev.close
+        trade_ret = 0.0
         if prev.signal == "BUY":
             trades += 1
-            pnl += ret
+            trade_ret = ret
             wins += 1 if ret > 0 else 0
         elif prev.signal == "SELL":
             trades += 1
-            pnl -= ret
+            trade_ret = -ret
             wins += 1 if ret < 0 else 0
+        pnl += trade_ret
+        returns.append(trade_ret)
+        equity.append(pnl)
 
     win_rate = wins / trades if trades else 0.0
+    avg_ret = sum(returns) / len(returns) if returns else 0.0
+    variance = sum((item - avg_ret) ** 2 for item in returns) / max(len(returns), 1)
+    std = variance**0.5
+    sharpe = (avg_ret / std) * (252**0.5) if std > 1e-9 else 0.0
+    peak = equity[0] if equity else 0.0
+    max_drawdown = 0.0
+    for value in equity:
+        peak = max(peak, value)
+        drawdown = peak - value
+        max_drawdown = max(max_drawdown, drawdown)
     return {
         "trades": float(trades),
         "pnl": round(pnl, 4),
         "win_rate": round(win_rate, 4),
+        "sharpe": round(sharpe, 4),
+        "max_drawdown": round(max_drawdown, 4),
     }
 
 
@@ -83,7 +101,8 @@ def main() -> None:
 
     print(
         f"symbol={args.symbol} strategy={args.strategy} trades={int(metrics['trades'])} "
-        f"pnl={metrics['pnl']} win_rate={metrics['win_rate']}"
+        f"pnl={metrics['pnl']} win_rate={metrics['win_rate']} "
+        f"sharpe={metrics['sharpe']} max_dd={metrics['max_drawdown']}"
     )
 
 

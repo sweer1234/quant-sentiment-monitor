@@ -1,0 +1,5 @@
+[lint]
+select = ["F", "E9"]
+
+[format]
+quote-style = "double"

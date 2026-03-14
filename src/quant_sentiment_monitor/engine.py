@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 from .models import ImpactItem
@@ -206,10 +207,68 @@ def infer_markets_and_impacts(title: str, content: str, related_instruments: lis
     return sorted(markets), impacts
 
 
-def aggregate_signal(long_score: float, short_score: float) -> tuple[str, float]:
+def normalize_text(text: str) -> str:
+    value = re.sub(r"\s+", " ", text or "").strip()
+    return value
+
+
+def classify_sentiment(title: str, content: str) -> str:
+    text = normalize_text(f"{title} {content}").lower()
+    negative_terms = ["暴跌", "爆雷", "违约", "下滑", "制裁", "冲突", "裁员", "hack", "风险", "紧张"]
+    positive_terms = ["上涨", "超预期", "改善", "突破", "增长", "回升", "宽松", "降息", "减税", "利好"]
+    pos = sum(1 for t in positive_terms if t in text)
+    neg = sum(1 for t in negative_terms if t in text)
+    if pos > neg:
+        return "positive"
+    if neg > pos:
+        return "negative"
+    return "neutral"
+
+
+def extract_entities(title: str, content: str) -> list[str]:
+    text = normalize_text(f"{title} {content}")
+    candidates = {
+        "美联储": ["美联储", "fed", "fomc"],
+        "欧洲央行": ["欧洲央行", "ecb"],
+        "日本央行": ["日本央行", "boj"],
+        "中国央行": ["人民银行", "pbc", "央行"],
+        "OPEC": ["opec"],
+        "美国": ["美国", "us "],
+        "中国": ["中国", "cn "],
+        "欧元区": ["欧元区", "euro area"],
+        "比特币": ["比特币", "btc"],
+        "以太坊": ["以太坊", "eth"],
+        "黄金": ["黄金", "xau", "gold"],
+        "原油": ["原油", "oil", "cl "],
+    }
+    lowered = text.lower()
+    found = []
+    for name, keys in candidates.items():
+        if any(key.lower() in lowered for key in keys):
+            found.append(name)
+    return sorted(set(found))
+
+
+def classify_event_type(title: str, content: str) -> str:
+    text = normalize_text(f"{title} {content}").lower()
+    rules = [
+        ("central_bank_policy", ["央行", "fed", "ecb", "boj", "利率", "点阵图"]),
+        ("macro_data_release", ["cpi", "ppi", "nfp", "gdp", "pmi", "失业率"]),
+        ("regulatory_event", ["监管", "执法", "证监", "罚款", "合规"]),
+        ("geopolitical_risk", ["战争", "冲突", "制裁", "地缘"]),
+        ("supply_chain", ["减产", "供应", "航运", "中断"]),
+        ("crypto_event", ["btc", "eth", "交易所", "稳定币", "链上"]),
+    ]
+    for event_type, keywords in rules:
+        if any(word in text for word in keywords):
+            return event_type
+    return "market_event"
+
+
+def aggregate_signal(long_score: float, short_score: float, *, buy_threshold: float = 12, sell_threshold: float = -12) -> tuple[str, float]:
     net = long_score - short_score
-    if net > 12:
+    if net > buy_threshold:
         return "BUY", clamp(abs(net) / 100 + 0.55, 0.0, 0.99)
-    if net < -12:
+    if net < sell_threshold:
         return "SELL", clamp(abs(net) / 100 + 0.55, 0.0, 0.99)
     return "HOLD", 0.55
