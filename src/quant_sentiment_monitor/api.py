@@ -44,7 +44,7 @@ collector_task_queue = build_task_queue(settings=settings)
 
 app = FastAPI(
     title="Quant Sentiment Monitor API",
-    version="0.4.0",
+    version="0.5.0",
     description="MVP backend for financial sentiment and event impact monitoring.",
 )
 
@@ -94,7 +94,7 @@ def require_public_or_permission(action: str):
 def root() -> dict[str, str]:
     return {
         "service": settings.app_name,
-        "version": "0.4.0",
+        "version": "0.5.0",
         "docs": "/docs",
         "health": "/api/v1/health",
         "openapi": "/openapi.json",
@@ -240,10 +240,10 @@ def get_event_detail(event_id: str) -> dict[str, Any]:
 @app.post("/api/v1/events/ingest")
 def ingest_event(
     request: EventIngestRequest,
-    _: str = Depends(require_permission("events.ingest")),
+    actor: str = Depends(require_permission("events.ingest")),
 ) -> dict[str, Any]:
     try:
-        return store.ingest_event(request.model_dump(mode="json"))
+        return store.ingest_event(request.model_dump(mode="json"), actor=actor)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -251,11 +251,12 @@ def ingest_event(
 @app.post("/api/v1/events/batch-ingest")
 def batch_ingest_events(
     request: EventBatchIngestRequest,
-    _: str = Depends(require_permission("events.ingest")),
+    actor: str = Depends(require_permission("events.ingest")),
 ) -> dict[str, Any]:
     return store.batch_ingest_events(
         payloads=[item.model_dump(mode="json") for item in request.events],
         request_id=request.request_id,
+        actor=actor,
     )
 
 
@@ -480,7 +481,10 @@ def rollback_source(
 
 
 @app.post("/api/v1/manual/messages")
-def create_manual_message(request: ManualMessageCreateRequest, _: None = Depends(require_token)) -> dict[str, Any]:
+def create_manual_message(
+    request: ManualMessageCreateRequest,
+    actor: str = Depends(require_public_or_permission("events.ingest")),
+) -> dict[str, Any]:
     missing = []
     for field in store.manual_input_rules.get("required_fields", []):
         value = getattr(request, field, None)
@@ -488,18 +492,24 @@ def create_manual_message(request: ManualMessageCreateRequest, _: None = Depends
             missing.append(field)
     if missing:
         raise HTTPException(status_code=422, detail=f"missing required fields: {','.join(missing)}")
-    record = store.create_manual_message(request)
+    record = store.create_manual_message(request, actor=actor)
     return record.model_dump(mode="json")
 
 
 @app.post("/api/v1/manual/messages/batch")
-def create_manual_message_batch(request: ManualMessageBatchRequest, _: None = Depends(require_token)) -> dict[str, Any]:
-    return store.batch_create_manual_messages(request.messages, as_draft=request.as_draft)
+def create_manual_message_batch(
+    request: ManualMessageBatchRequest,
+    actor: str = Depends(require_public_or_permission("events.ingest")),
+) -> dict[str, Any]:
+    return store.batch_create_manual_messages(request.messages, as_draft=request.as_draft, actor=actor)
 
 
 @app.post("/api/v1/manual/messages/draft")
-def create_manual_message_draft(request: ManualMessageCreateRequest, _: None = Depends(require_token)) -> dict[str, Any]:
-    record = store.create_manual_message(request, as_draft=True)
+def create_manual_message_draft(
+    request: ManualMessageCreateRequest,
+    actor: str = Depends(require_public_or_permission("events.ingest")),
+) -> dict[str, Any]:
+    record = store.create_manual_message(request, as_draft=True, actor=actor)
     return record.model_dump(mode="json")
 
 
@@ -692,6 +702,11 @@ def event_features(event_id: str) -> dict[str, Any]:
     return result
 
 
+@app.get("/api/v1/model/inference/status")
+def model_inference_status(_: str = Depends(require_permission("admin.state"))) -> dict[str, Any]:
+    return store.inference_status()
+
+
 @app.post("/api/v1/feedback/events/{event_id}")
 def event_feedback(
     event_id: str,
@@ -730,6 +745,27 @@ def billing_usage(tenant_id: str = Query(...), period: str = Query(...), _: str 
 @app.get("/api/v1/sla/status")
 def sla_status(tenant_id: str = Query(...), _: str = Depends(get_current_user)) -> dict[str, Any]:
     return store.sla_status(tenant_id=tenant_id)
+
+
+@app.get("/api/v1/admin/quotas/users/{username}")
+def admin_user_quota_status(
+    username: str,
+    period: str | None = Query(default=None),
+    _: str = Depends(require_permission("admin.state")),
+) -> dict[str, Any]:
+    return store.user_quota_status(username=username, period=period)
+
+
+@app.put("/api/v1/admin/quotas/users/{username}")
+def admin_set_user_plan(
+    username: str,
+    plan: str = Query(...),
+    actor: str = Depends(require_permission("admin.state")),
+) -> dict[str, Any]:
+    try:
+        return store.set_user_plan(username=username, plan=plan, actor=actor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/v1/metrics/summary")

@@ -11,7 +11,7 @@ if TEST_STATE_PATH.exists():
     TEST_STATE_PATH.unlink()
 os.environ["QSM_STATE_PATH"] = str(TEST_STATE_PATH)
 
-from quant_sentiment_monitor.api import app, settings
+from quant_sentiment_monitor.api import app, settings, store
 
 
 client = TestClient(app)
@@ -121,6 +121,19 @@ def test_source_import_delete_and_signal_thresholds() -> None:
     assert delete_resp.status_code == 200
     assert delete_resp.json()["status"] == "deleted"
 
+    model_status = client.get("/api/v1/model/inference/status", headers=admin_headers)
+    assert model_status.status_code == 200
+    assert "backend" in model_status.json()
+
+    quota_status = client.get("/api/v1/admin/quotas/users/demo", headers=admin_headers)
+    assert quota_status.status_code == 200
+    assert quota_status.json()["username"] == "demo"
+    put_plan = client.put("/api/v1/admin/quotas/users/demo?plan=pro", headers=admin_headers)
+    assert put_plan.status_code == 200
+    assert put_plan.json()["plan"] == "pro"
+    restore_plan = client.put("/api/v1/admin/quotas/users/demo?plan=basic", headers=admin_headers)
+    assert restore_plan.status_code == 200
+
 
 def test_collector_task_queue_endpoints() -> None:
     admin_headers = _login_headers(username="sweer1234", password="dev123")
@@ -146,6 +159,33 @@ def test_collector_task_queue_endpoints() -> None:
         processed = client.post("/api/v1/collector/tasks/process?max_tasks=5", headers=admin_headers)
     assert processed.status_code == 200
     assert processed.json()["processed"] >= 1
+
+
+def test_event_quota_enforcement() -> None:
+    demo_headers = _login_headers(username="demo", password="demo123")
+    period = store._current_period()
+    usage_key = f"demo:{period}"
+    basic_quota = store.billing_sla_rules.get("tiers", {}).get("basic", {}).get("monthly_event_quota", 50000)
+    store.billing_sla_rules.setdefault("tiers", {}).setdefault("basic", {})["monthly_event_quota"] = 1
+    store.user_plans["demo"] = "basic"
+    store.usage_counters.pop(usage_key, None)
+    try:
+        first = client.post(
+            "/api/v1/events/ingest",
+            headers=demo_headers,
+            json={"source_id": "federal_reserve", "title": "quota test one", "content": "quota test one"},
+        )
+        assert first.status_code == 200
+        second = client.post(
+            "/api/v1/events/ingest",
+            headers=demo_headers,
+            json={"source_id": "federal_reserve", "title": "quota test two", "content": "quota test two"},
+        )
+        assert second.status_code == 422
+        assert "quota exceeded" in second.json()["detail"]
+    finally:
+        store.billing_sla_rules.setdefault("tiers", {}).setdefault("basic", {})["monthly_event_quota"] = basic_quota
+        store.usage_counters.pop(usage_key, None)
 
 
 def test_event_feed_and_impact() -> None:
@@ -578,7 +618,7 @@ def test_auth_and_permission_denied_paths() -> None:
         headers=analyst_headers,
         json={"as_draft": True, "messages": []},
     )
-    assert denied_manual_batch.status_code == 401
+    assert denied_manual_batch.status_code == 200
     denied_publish = client.post(f"/api/v1/manual/messages/{mm_id}/publish", headers=analyst_headers)
     assert denied_publish.status_code == 403
     denied_reevaluate = client.post(f"/api/v1/manual/messages/{mm_id}/re-evaluate", headers=analyst_headers)

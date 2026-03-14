@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qsm-config
+data:
+  QSM_APP_NAME: "quant-sentiment-monitor"
+  QSM_ENV: "prod"
+  QSM_STATE_BACKEND: "sql"
+  QSM_DATABASE_URL: "postgresql+psycopg://qsm:qsm@postgres.default.svc.cluster.local:5432/qsm"
+  QSM_QUEUE_BACKEND: "redis"
+  QSM_QUEUE_REDIS_URL: "redis://redis.default.svc.cluster.local:6379/0"
+  QSM_COLLECTOR_TASK_QUEUE_KEY: "qsm:collector:tasks"
+  QSM_MODEL_BACKEND: "http"
+  QSM_MODEL_SERVICE_URL: "http://qsm-model.default.svc.cluster.local:9000/infer"
+  QSM_MODEL_SERVICE_TIMEOUT_SEC: "3"

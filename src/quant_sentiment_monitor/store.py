@@ -16,13 +16,11 @@ import yaml
 from .engine import (
     aggregate_signal,
     calculate_effective_source_weight,
-    classify_event_type,
-    classify_sentiment,
-    extract_entities,
     infer_markets_and_impacts,
     level_from_score,
     now_utc,
 )
+from .inference import build_inference_adapter
 from .models import Event, ImpactItem, ManualMessageCreateRequest, ManualMessageRecord
 from .settings import Settings
 from .state_backend import build_state_backend
@@ -40,6 +38,7 @@ class QuantStore:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._state_backend = build_state_backend(settings)
+        self._inference = build_inference_adapter(settings)
         self._lock = Lock()
         self.sources: list[dict[str, Any]] = []
         self.source_weight_rules: dict[str, Any] = {}
@@ -77,12 +76,14 @@ class QuantStore:
         self.alert_escalations: list[dict[str, Any]] = []
         self.feedback_records: list[dict[str, Any]] = []
         self.ingest_stats: dict[str, int] = {"total": 0, "deduplicated": 0, "accepted": 0}
+        self.usage_counters: dict[str, dict[str, int]] = {}
         self.request_cache: dict[str, dict[str, Any]] = {}
         self.audit_logs: list[dict[str, Any]] = []
         self.signal_thresholds: dict[str, float] = {"buy_net_threshold": 12.0, "sell_net_threshold": -12.0}
         self.notification_outbox: list[dict[str, Any]] = []
         self.source_poll_state: dict[str, dict[str, Any]] = {}
         self.source_versions: dict[str, list[dict[str, Any]]] = {}
+        self.user_plans: dict[str, str] = {"sweer1234": "enterprise", "adollman": "pro", "demo": "basic"}
         self.webhook_subscriptions: dict[str, dict[str, Any]] = {}
         self.webhook_deliveries: list[dict[str, Any]] = []
         self.webhook_queue: list[dict[str, Any]] = []
@@ -159,12 +160,14 @@ class QuantStore:
             "user_topic_subscriptions": {k: sorted(v) for k, v in self.user_topic_subscriptions.items()},
             "feedback_records": self.feedback_records,
             "ingest_stats": self.ingest_stats,
+            "usage_counters": self.usage_counters,
             "request_cache": self.request_cache,
             "audit_logs": self.audit_logs,
             "signal_thresholds": self.signal_thresholds,
             "notification_outbox": self.notification_outbox,
             "source_poll_state": self.source_poll_state,
             "source_versions": self.source_versions,
+            "user_plans": self.user_plans,
             "webhook_subscriptions": list(self.webhook_subscriptions.values()),
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,
@@ -190,6 +193,11 @@ class QuantStore:
             self.user_topic_subscriptions = {k: set(v) for k, v in dict(payload.get("user_topic_subscriptions", {})).items()}
             self.feedback_records = list(payload.get("feedback_records", []))
             self.ingest_stats = dict(payload.get("ingest_stats", {"total": 0, "deduplicated": 0, "accepted": 0}))
+            self.usage_counters = {
+                str(key): {k: int(v) for k, v in dict(value).items()}
+                for key, value in dict(payload.get("usage_counters", {})).items()
+                if isinstance(value, dict)
+            }
             self.request_cache = dict(payload.get("request_cache", {}))
             self.audit_logs = list(payload.get("audit_logs", []))
             self.signal_thresholds = dict(payload.get("signal_thresholds", self.signal_thresholds))
@@ -200,6 +208,7 @@ class QuantStore:
                 for key, value in dict(payload.get("source_versions", {})).items()
                 if isinstance(value, list)
             }
+            self.user_plans.update({str(k): str(v) for k, v in dict(payload.get("user_plans", {})).items()})
             self.webhook_subscriptions = {
                 item["subscription_id"]: item for item in payload.get("webhook_subscriptions", []) if "subscription_id" in item
             }
@@ -241,9 +250,11 @@ class QuantStore:
     def _build_event(self, source_id: str, title: str, content: str, related_instruments: list[str] | None = None) -> Event:
         markets, impacts = infer_markets_and_impacts(title=title, content=content, related_instruments=related_instruments)
         importance_score, importance_level = self._score_event(source_id=source_id, impacts=impacts)
-        event_type = classify_event_type(title=title, content=content)
-        sentiment = classify_sentiment(title=title, content=content)
-        entities = extract_entities(title=title, content=content)
+        analysis = self._inference.analyze(title=title, content=content)
+        event_type = str(analysis.get("event_type", "market_event"))
+        sentiment = str(analysis.get("sentiment", "neutral"))
+        entities = [str(item) for item in analysis.get("entities", [])]
+        provider = str(analysis.get("provider", "unknown"))
         now = now_utc()
         return Event(
             event_id=self._next_event_id(),
@@ -258,7 +269,12 @@ class QuantStore:
             impacted_markets=markets,
             impacts=impacts,
             credibility_level="verified",
-            evidence=["auto_generated_rule_engine", f"entity_count:{len(entities)}", f"sentiment:{sentiment}"],
+            evidence=[
+                "auto_generated_rule_engine",
+                f"entity_count:{len(entities)}",
+                f"sentiment:{sentiment}",
+                f"inference_provider:{provider}",
+            ],
             sentiment=sentiment,  # type: ignore[arg-type]
             entities=entities,
             tags=[event_type, sentiment],
@@ -307,7 +323,7 @@ class QuantStore:
         instrument_ok = not instruments or bool(event_instruments & instruments)
         return keyword_ok and market_ok and instrument_ok
 
-    def _create_alert_for_event(self, event: Event) -> dict[str, Any] | None:
+    def _create_alert_for_event(self, event: Event, *, actor: str = "system") -> dict[str, Any] | None:
         threshold = {"P0": 85, "P1": 70, "P2": 0}
         if event.importance_score < threshold.get(event.importance_level, 0):
             return None
@@ -347,6 +363,8 @@ class QuantStore:
         }
         self.alerts[alert_id] = alert
         self._queue_alert_notifications(alert=alert, event=event)
+        if actor in self.users:
+            self._increment_usage(actor, "alerts_generated", 1)
         return alert
 
     def _queue_alert_notifications(self, *, alert: dict[str, Any], event: Event) -> None:
@@ -394,7 +412,7 @@ class QuantStore:
             return event
         return None
 
-    def ingest_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def ingest_event(self, payload: dict[str, Any], *, actor: str = "system") -> dict[str, Any]:
         self.ingest_stats["total"] = int(self.ingest_stats.get("total", 0)) + 1
         source_id = str(payload.get("source_id", "")).strip()
         if not source_id:
@@ -414,13 +432,16 @@ class QuantStore:
         duplicate = self._find_duplicate_event(source_id=source_id, title=title, content=content, published_at=published_at)
         if duplicate:
             self.ingest_stats["deduplicated"] = int(self.ingest_stats.get("deduplicated", 0)) + 1
-            self._audit("event.ingest_deduplicated", "system", {"event_id": duplicate.event_id, "source_id": source_id})
+            self._audit("event.ingest_deduplicated", actor, {"event_id": duplicate.event_id, "source_id": source_id})
             self._persist_state()
             return {
                 "event": duplicate.model_dump(mode="json"),
                 "alert": None,
                 "deduplicated": True,
             }
+
+        if actor in self.users:
+            self._ensure_quota(actor, field="events_ingested", increment=1)
 
         event = self._build_event(
             source_id=source_id,
@@ -440,9 +461,11 @@ class QuantStore:
             event.evidence = list(payload.get("evidence", []))
 
         self.events[event.event_id] = event
-        alert = self._create_alert_for_event(event)
+        alert = self._create_alert_for_event(event, actor=actor)
         self.ingest_stats["accepted"] = int(self.ingest_stats.get("accepted", 0)) + 1
-        self._audit("event.ingest", "system", {"event_id": event.event_id, "source_id": source_id, "alert_created": bool(alert)})
+        if actor in self.users:
+            self._increment_usage(actor, "events_ingested", 1)
+        self._audit("event.ingest", actor, {"event_id": event.event_id, "source_id": source_id, "alert_created": bool(alert)})
         self._persist_state()
         return {
             "event": event.model_dump(mode="json"),
@@ -450,11 +473,17 @@ class QuantStore:
             "deduplicated": False,
         }
 
-    def batch_ingest_events(self, payloads: list[dict[str, Any]], request_id: str | None = None) -> dict[str, Any]:
+    def batch_ingest_events(
+        self,
+        payloads: list[dict[str, Any]],
+        request_id: str | None = None,
+        *,
+        actor: str = "system",
+    ) -> dict[str, Any]:
         if request_id and request_id in self.request_cache:
             cached = deepcopy(self.request_cache[request_id])
             cached["idempotent_hit"] = True
-            self._audit("event.batch_ingest.idempotent_hit", "system", {"request_id": request_id})
+            self._audit("event.batch_ingest.idempotent_hit", actor, {"request_id": request_id})
             return cached
 
         results = []
@@ -463,7 +492,7 @@ class QuantStore:
         rejected = 0
         for item in payloads:
             try:
-                result = self.ingest_event(item)
+                result = self.ingest_event(item, actor=actor)
                 results.append({"ok": True, **result})
                 if result.get("deduplicated"):
                     deduplicated += 1
@@ -485,7 +514,7 @@ class QuantStore:
             self.request_cache[request_id] = deepcopy(response)
         self._audit(
             "event.batch_ingest",
-            "system",
+            actor,
             {"request_id": request_id, "total": len(payloads), "accepted": accepted, "deduplicated": deduplicated, "rejected": rejected},
         )
         self._persist_state()
@@ -789,7 +818,7 @@ class QuantStore:
             ],
         }
 
-    def _publish_manual_message_event(self, record: ManualMessageRecord) -> str | None:
+    def _publish_manual_message_event(self, record: ManualMessageRecord, *, actor: str = "system") -> str | None:
         if record.linked_event_id and record.linked_event_id in self.events:
             return record.linked_event_id
         assessed = self._manual_message_assessment(record.request)
@@ -797,10 +826,16 @@ class QuantStore:
         event.importance_score = float(record.importance_score)
         event.importance_level = str(record.importance_level)  # type: ignore[assignment]
         self.events[event.event_id] = event
-        self._create_alert_for_event(event)
+        self._create_alert_for_event(event, actor=actor)
         return event.event_id
 
-    def create_manual_message(self, request: ManualMessageCreateRequest, *, as_draft: bool = False) -> ManualMessageRecord:
+    def create_manual_message(
+        self,
+        request: ManualMessageCreateRequest,
+        *,
+        as_draft: bool = False,
+        actor: str = "public_token",
+    ) -> ManualMessageRecord:
         now = now_utc()
         if as_draft:
             record = ManualMessageRecord(
@@ -845,8 +880,10 @@ class QuantStore:
         if float(record.importance_score) >= float(
             self.manual_input_rules.get("auto_assessment", {}).get("publish_gate", {}).get("min_importance_score", 60)
         ):
-            record.linked_event_id = self._publish_manual_message_event(record)
-        self._audit("manual.create", request.operator_id, {"manual_message_id": record.manual_message_id})
+            record.linked_event_id = self._publish_manual_message_event(record, actor=actor)
+        if actor in self.users:
+            self._increment_usage(actor, "manual_messages_created", 1)
+        self._audit("manual.create", request.operator_id, {"manual_message_id": record.manual_message_id, "actor": actor})
         self._persist_state()
         return record
 
@@ -855,12 +892,13 @@ class QuantStore:
         requests: list[ManualMessageCreateRequest],
         *,
         as_draft: bool = False,
+        actor: str = "public_token",
     ) -> dict[str, Any]:
         rows = []
         created = 0
         for request in requests:
             try:
-                record = self.create_manual_message(request, as_draft=as_draft)
+                record = self.create_manual_message(request, as_draft=as_draft, actor=actor)
                 rows.append({"ok": True, "manual_message": record.model_dump(mode="json")})
                 created += 1
             except Exception as exc:
@@ -897,7 +935,7 @@ class QuantStore:
             return None
         if record.status not in {"approved", "auto_assessed", "published"}:
             return None
-        record.linked_event_id = self._publish_manual_message_event(record)
+        record.linked_event_id = self._publish_manual_message_event(record, actor=actor)
         record.status = "published"
         record.updated_at = now_utc()
         self._audit("manual.publish", actor, {"manual_message_id": manual_message_id, "event_id": record.linked_event_id})
@@ -1069,6 +1107,47 @@ class QuantStore:
             "created_at": now_utc().isoformat(),
         }
         self.audit_logs.append(record)
+
+    def _current_period(self) -> str:
+        return now_utc().strftime("%Y-%m")
+
+    def _plan_for_user(self, username: str) -> str:
+        return self.user_plans.get(username, "basic")
+
+    def _tier_quota(self, plan: str) -> dict[str, Any]:
+        tiers = self.billing_sla_rules.get("tiers", {})
+        return dict(tiers.get(plan, tiers.get("basic", {})))
+
+    def _usage_key(self, username: str, period: str | None = None) -> str:
+        return f"{username}:{period or self._current_period()}"
+
+    def _usage_bucket(self, username: str, period: str | None = None) -> dict[str, int]:
+        key = self._usage_key(username, period)
+        return self.usage_counters.setdefault(
+            key,
+            {
+                "events_ingested": 0,
+                "manual_messages_created": 0,
+                "alerts_generated": 0,
+            },
+        )
+
+    def _increment_usage(self, username: str, field: str, amount: int = 1) -> None:
+        bucket = self._usage_bucket(username)
+        bucket[field] = int(bucket.get(field, 0)) + int(amount)
+
+    def _ensure_quota(self, username: str, *, field: str, increment: int = 1) -> None:
+        plan = self._plan_for_user(username)
+        quota = self._tier_quota(plan)
+        bucket = self._usage_bucket(username)
+        if field == "events_ingested":
+            limit = int(quota.get("monthly_event_quota", 0))
+        elif field == "alerts_generated":
+            limit = int(quota.get("monthly_alert_quota", 0))
+        else:
+            return
+        if limit > 0 and int(bucket.get(field, 0)) + int(increment) > limit:
+            raise ValueError(f"quota exceeded: plan={plan} field={field} limit={limit}")
 
     def list_audit_logs(
         self,
@@ -1540,26 +1619,60 @@ class QuantStore:
         return {"status": "ok", "processed": processed, "delivered": delivered}
 
     def billing_usage(self, tenant_id: str, period: str) -> dict[str, Any]:
-        total_events = len(self.events)
-        total_alerts = len(self.events) + len(self.manual_messages)
+        plan = self._plan_for_user(tenant_id)
+        usage = self._usage_bucket(tenant_id, period)
+        total_events = int(usage.get("events_ingested", 0))
+        total_alerts = int(usage.get("alerts_generated", 0))
         return {
             "tenant_id": tenant_id,
             "period": period,
             "events_used": total_events,
             "alerts_used": total_alerts,
-            "plan": "pro",
-            "quota": self.billing_sla_rules.get("tiers", {}).get("pro", {}),
+            "manual_messages_used": int(usage.get("manual_messages_created", 0)),
+            "plan": plan,
+            "quota": self._tier_quota(plan),
         }
 
     def sla_status(self, tenant_id: str) -> dict[str, Any]:
-        pro_sla = self.billing_sla_rules.get("tiers", {}).get("pro", {}).get("sla", {})
+        plan = self._plan_for_user(tenant_id)
+        plan_sla = self._tier_quota(plan).get("sla", {})
         return {
             "tenant_id": tenant_id,
-            "availability_target": pro_sla.get("availability", 99.9),
-            "p95_latency_target_ms": pro_sla.get("p95_latency_ms", 1000),
+            "plan": plan,
+            "availability_target": plan_sla.get("availability", 99.9),
+            "p95_latency_target_ms": plan_sla.get("p95_latency_ms", 1000),
             "availability_rolling_30d": 99.97,
             "p95_latency_ms": 680,
             "status": "healthy",
+        }
+
+    def set_user_plan(self, username: str, plan: str, *, actor: str) -> dict[str, Any]:
+        allowed = set(self.billing_sla_rules.get("tiers", {}).keys())
+        if plan not in allowed:
+            raise ValueError(f"invalid plan: {plan}")
+        self.user_plans[username] = plan
+        self._audit("billing.plan.set", actor, {"username": username, "plan": plan})
+        self._persist_state()
+        return {"username": username, "plan": plan}
+
+    def user_quota_status(self, username: str, *, period: str | None = None) -> dict[str, Any]:
+        period_value = period or self._current_period()
+        plan = self._plan_for_user(username)
+        usage = self._usage_bucket(username, period_value)
+        quota = self._tier_quota(plan)
+        return {
+            "username": username,
+            "period": period_value,
+            "plan": plan,
+            "quota": quota,
+            "usage": usage,
+        }
+
+    def inference_status(self) -> dict[str, Any]:
+        return {
+            "backend": self.settings.model_backend,
+            "service_url": self.settings.model_service_url if self.settings.model_backend == "http" else None,
+            "adapter": self._inference.__class__.__name__,
         }
 
     def list_calendar_events(
@@ -2191,6 +2304,8 @@ class QuantStore:
             "alerts_total": len(self.alerts),
             "alerts_active": active_alerts,
             "alerts_acked": acked_alerts,
+            "quota_users_tracked": len({key.split(":")[0] for key in self.usage_counters.keys()}),
+            "quota_buckets_total": len(self.usage_counters),
             "users_total": len(self.users),
             "feedback_total": len(self.feedback_records),
             "audit_total": len(self.audit_logs),
@@ -2214,11 +2329,13 @@ class QuantStore:
             "user_topic_subscriptions": {k: sorted(v) for k, v in self.user_topic_subscriptions.items()},
             "feedback_records": self.feedback_records,
             "ingest_stats": self.ingest_stats,
+            "usage_counters": self.usage_counters,
             "request_cache": self.request_cache,
             "signal_thresholds": self.signal_thresholds,
             "notification_outbox": self.notification_outbox,
             "source_poll_state": self.source_poll_state,
             "source_versions": self.source_versions,
+            "user_plans": self.user_plans,
             "webhook_subscriptions": list(self.webhook_subscriptions.values()),
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,
@@ -2238,10 +2355,12 @@ class QuantStore:
             self.user_topic_subscriptions = {}
             self.feedback_records = []
             self.ingest_stats = {"total": 0, "deduplicated": 0, "accepted": 0}
+            self.usage_counters = {}
             self.signal_thresholds = {"buy_net_threshold": 12.0, "sell_net_threshold": -12.0}
             self.notification_outbox = []
             self.source_poll_state = {}
             self.source_versions = {}
+            self.user_plans = {"sweer1234": "enterprise", "adollman": "pro", "demo": "basic"}
             self.webhook_subscriptions = {}
             self.webhook_deliveries = []
             self.webhook_queue = []
@@ -2294,6 +2413,10 @@ class QuantStore:
         incoming_stats = dict(payload.get("ingest_stats", {}))
         for field in ("total", "deduplicated", "accepted"):
             self.ingest_stats[field] = int(incoming_stats.get(field, self.ingest_stats.get(field, 0)))
+        for key, row in dict(payload.get("usage_counters", {})).items():
+            if not isinstance(row, dict):
+                continue
+            self.usage_counters[str(key)] = {k: int(v) for k, v in row.items()}
         self.request_cache.update(dict(payload.get("request_cache", {})))
         self.signal_thresholds.update(dict(payload.get("signal_thresholds", {})))
         self.notification_outbox.extend(payload.get("notification_outbox", []))
@@ -2302,6 +2425,7 @@ class QuantStore:
             if not isinstance(versions, list):
                 continue
             self.source_versions[str(source_id)] = list(versions)
+        self.user_plans.update({str(k): str(v) for k, v in dict(payload.get("user_plans", {})).items()})
 
         self._audit(
             "admin.state.import",
@@ -2328,11 +2452,13 @@ class QuantStore:
         self.user_topic_subscriptions = {}
         self.feedback_records = []
         self.ingest_stats = {"total": 0, "deduplicated": 0, "accepted": 0}
+        self.usage_counters = {}
         self.request_cache = {}
         self.signal_thresholds = {"buy_net_threshold": 12.0, "sell_net_threshold": -12.0}
         self.notification_outbox = []
         self.source_poll_state = {}
         self.source_versions = {}
+        self.user_plans = {"sweer1234": "enterprise", "adollman": "pro", "demo": "basic"}
         self.webhook_subscriptions = {}
         self.webhook_deliveries = []
         self.webhook_queue = []

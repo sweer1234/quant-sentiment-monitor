@@ -96,7 +96,7 @@ def run_collection_once(store: QuantStore, *, limit: int = 20, retries: int = 2)
                 "published_at": _now_iso(),
                 "event_type": "source_polling_update",
             }
-            result = store.ingest_event(payload)
+            result = store.ingest_event(payload, actor="collector")
             if result.get("deduplicated"):
                 deduplicated += 1
             else:

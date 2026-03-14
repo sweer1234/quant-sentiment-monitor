@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qsm-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: qsm-api
+  template:
+    metadata:
+      labels:
+        app: qsm-api
+    spec:
+      containers:
+        - name: api
+          image: qsm-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: qsm-config
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15

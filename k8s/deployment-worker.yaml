@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qsm-collector-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qsm-collector-worker
+  template:
+    metadata:
+      labels:
+        app: qsm-collector-worker
+    spec:
+      containers:
+        - name: worker
+          image: qsm-api:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "scripts/run_collector_worker.py", "--poll-interval-sec", "3"]
+          envFrom:
+            - configMapRef:
+                name: qsm-config

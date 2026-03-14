@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     queue_backend: str = "local"
     queue_redis_url: str = "redis://localhost:6379/0"
     collector_task_queue_key: str = "qsm:collector:tasks"
+    model_backend: str = "local"
+    model_service_url: str = "http://127.0.0.1:9000/infer"
+    model_service_timeout_sec: int = 3
 
     model_config = SettingsConfigDict(env_prefix="QSM_", env_file=".env", extra="ignore")
 

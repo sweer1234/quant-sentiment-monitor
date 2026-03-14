@@ -1156,6 +1156,14 @@ CI 已内置：`.github/workflows/tests.yml`（push 到 `main` / PR 自动执行
 - HPA 自动扩缩容
 - 蓝绿或金丝雀发布
 
+参考清单（已提供模板）：
+```bash
+kubectl apply -f k8s/configmap.yaml
+kubectl apply -f k8s/deployment-api.yaml
+kubectl apply -f k8s/deployment-worker.yaml
+kubectl apply -f k8s/service.yaml
+```
+
 ### 13.3 CI/CD（示例）
 1. push 触发 lint + test  
 2. 构建镜像并推送镜像仓库  
