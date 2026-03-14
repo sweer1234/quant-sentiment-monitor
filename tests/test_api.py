@@ -122,6 +122,32 @@ def test_source_import_delete_and_signal_thresholds() -> None:
     assert delete_resp.json()["status"] == "deleted"
 
 
+def test_collector_task_queue_endpoints() -> None:
+    admin_headers = _login_headers(username="sweer1234", password="dev123")
+    stats_before = client.get("/api/v1/collector/tasks/stats", headers=admin_headers)
+    assert stats_before.status_code == 200
+    assert "backend" in stats_before.json()
+
+    enqueue = client.post(
+        "/api/v1/collector/tasks/enqueue",
+        headers=admin_headers,
+        json={"limit": 2, "retries": 0},
+    )
+    assert enqueue.status_code == 200
+    assert enqueue.json()["task_id"].startswith("task_")
+
+    with patch(
+        "quant_sentiment_monitor.collector._fetch_url",
+        return_value=(
+            "<rss><channel><item><title>Task queue item</title><description>desc</description></item></channel></rss>",
+            None,
+        ),
+    ):
+        processed = client.post("/api/v1/collector/tasks/process?max_tasks=5", headers=admin_headers)
+    assert processed.status_code == 200
+    assert processed.json()["processed"] >= 1
+
+
 def test_event_feed_and_impact() -> None:
     feed = client.get("/api/v1/events/feed?page=1&page_size=5")
     assert feed.status_code == 200
@@ -626,6 +652,12 @@ def test_auth_and_permission_denied_paths() -> None:
     assert denied_notifications.status_code == 403
     denied_collector = client.post("/api/v1/collector/run-once", headers=trader_headers)
     assert denied_collector.status_code == 403
+    denied_collector_enqueue = client.post("/api/v1/collector/tasks/enqueue", headers=trader_headers, json={})
+    assert denied_collector_enqueue.status_code == 403
+    denied_collector_stats = client.get("/api/v1/collector/tasks/stats", headers=trader_headers)
+    assert denied_collector_stats.status_code == 403
+    denied_collector_process = client.post("/api/v1/collector/tasks/process", headers=trader_headers)
+    assert denied_collector_process.status_code == 403
 
     # Missing token should fail.
     no_token = client.get("/api/v1/users/me")

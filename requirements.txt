@@ -2,3 +2,6 @@ fastapi
 uvicorn[standard]
 pydantic-settings
 PyYAML
+SQLAlchemy
+psycopg[binary]
+redis

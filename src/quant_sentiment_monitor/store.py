@@ -25,6 +25,7 @@ from .engine import (
 )
 from .models import Event, ImpactItem, ManualMessageCreateRequest, ManualMessageRecord
 from .settings import Settings
+from .state_backend import build_state_backend
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -38,6 +39,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 class QuantStore:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._state_backend = build_state_backend(settings)
         self._lock = Lock()
         self.sources: list[dict[str, Any]] = []
         self.source_weight_rules: dict[str, Any] = {}
@@ -146,8 +148,6 @@ class QuantStore:
             }
 
     def _persist_state(self) -> None:
-        state_file = self.settings.state_path_obj
-        state_file.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "events": [event.model_dump(mode="json") for event in self.events.values()],
             "manual_messages": [item.model_dump(mode="json") for item in self.manual_messages.values()],
@@ -172,17 +172,11 @@ class QuantStore:
             "webhook_queue_paused": self.webhook_queue_paused,
             "calendar_events": list(self.calendar_events.values()),
         }
-        with state_file.open("w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+        self._state_backend.save(payload)
 
     def _load_state(self) -> bool:
-        state_file = self.settings.state_path_obj
-        if not state_file.exists():
-            return False
-        try:
-            with state_file.open("r", encoding="utf-8") as f:
-                payload = json.load(f)
-        except Exception:
+        payload = self._state_backend.load()
+        if not payload:
             return False
 
         try:

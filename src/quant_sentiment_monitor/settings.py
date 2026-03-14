@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     event_calendar_rules: str = "configs/event_calendar_rules.yaml"
     webhook_delivery_rules: str = "configs/webhook_delivery_rules.yaml"
     state_path: str = "data/state.json"
+    state_backend: str = "file"
+    database_url: str = "sqlite:///data/qsm.db"
+    state_sql_table: str = "qsm_state"
+    queue_backend: str = "local"
+    queue_redis_url: str = "redis://localhost:6379/0"
+    collector_task_queue_key: str = "qsm:collector:tasks"
 
     model_config = SettingsConfigDict(env_prefix="QSM_", env_file=".env", extra="ignore")
 

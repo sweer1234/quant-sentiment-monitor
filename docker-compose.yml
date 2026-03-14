@@ -11,7 +11,38 @@ services:
       QSM_ENV: dev
       QSM_PUBLIC_API_TOKEN: dev-public-token
       QSM_STATE_PATH: data/state.json
+      QSM_STATE_BACKEND: sql
+      QSM_DATABASE_URL: postgresql+psycopg://qsm:qsm@postgres:5432/qsm
+      QSM_QUEUE_BACKEND: redis
+      QSM_QUEUE_REDIS_URL: redis://redis:6379/0
     volumes:
       - ./data:/app/data
       - ./configs:/app/configs
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16
+    container_name: qsm-postgres
+    environment:
+      POSTGRES_DB: qsm
+      POSTGRES_USER: qsm
+      POSTGRES_PASSWORD: qsm
+    ports:
+      - "5432:5432"
+    volumes:
+      - qsm-postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: qsm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - qsm-redis-data:/data
+
+volumes:
+  qsm-postgres-data:
+  qsm-redis-data:
 

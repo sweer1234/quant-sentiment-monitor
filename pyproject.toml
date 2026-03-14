@@ -13,6 +13,9 @@ dependencies = [
   "uvicorn[standard]",
   "pydantic-settings",
   "PyYAML",
+  "SQLAlchemy",
+  "psycopg[binary]",
+  "redis",
 ]
 
 [project.optional-dependencies]

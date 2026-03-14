@@ -35,14 +35,16 @@ from .models import (
 from .settings import Settings
 from .store import QuantStore
 from .collector import run_collection_once
+from .task_queue import build_task_queue
 
 
 settings = Settings()
 store = QuantStore(settings=settings)
+collector_task_queue = build_task_queue(settings=settings)
 
 app = FastAPI(
     title="Quant Sentiment Monitor API",
-    version="0.3.0",
+    version="0.4.0",
     description="MVP backend for financial sentiment and event impact monitoring.",
 )
 
@@ -92,10 +94,11 @@ def require_public_or_permission(action: str):
 def root() -> dict[str, str]:
     return {
         "service": settings.app_name,
-        "version": "0.3.0",
+        "version": "0.4.0",
         "docs": "/docs",
         "health": "/api/v1/health",
         "openapi": "/openapi.json",
+        "collector_queue_backend": collector_task_queue.backend_name(),
     }
 
 
@@ -263,6 +266,65 @@ def collector_run_once(
     _: str = Depends(require_permission("admin.state")),
 ) -> dict[str, Any]:
     return run_collection_once(store=store, limit=limit, retries=retries)
+
+
+@app.post("/api/v1/collector/tasks/enqueue")
+def enqueue_collector_task(
+    payload: dict[str, Any] | None = None,
+    actor: str = Depends(require_permission("admin.state")),
+) -> dict[str, Any]:
+    body = payload or {}
+    limit = int(body.get("limit", 20))
+    retries = int(body.get("retries", 2))
+    task_id = collector_task_queue.enqueue(
+        {
+            "kind": "collector.run_once",
+            "limit": max(1, min(limit, 200)),
+            "retries": max(0, min(retries, 5)),
+            "actor": actor,
+            "enqueued_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    store._audit("collector.task.enqueue", actor, {"task_id": task_id, "queue_backend": collector_task_queue.backend_name()})
+    return {"status": "ok", "task_id": task_id, "queue_size": collector_task_queue.size()}
+
+
+@app.get("/api/v1/collector/tasks/stats")
+def collector_task_stats(_: str = Depends(require_permission("admin.state"))) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "backend": collector_task_queue.backend_name(),
+        "queue_size": collector_task_queue.size(),
+        "queue_key": settings.collector_task_queue_key if collector_task_queue.backend_name() == "redis" else None,
+    }
+
+
+@app.post("/api/v1/collector/tasks/process")
+def process_collector_tasks(
+    max_tasks: int = Query(default=1, ge=1, le=100),
+    actor: str = Depends(require_permission("admin.state")),
+) -> dict[str, Any]:
+    tasks = collector_task_queue.pop_many(max_items=max_tasks)
+    results = []
+    for task in tasks:
+        if str(task.get("kind")) != "collector.run_once":
+            results.append({"task_id": task.get("task_id"), "ok": False, "error": "unknown_task_kind"})
+            continue
+        limit = int(task.get("limit", 20))
+        retries = int(task.get("retries", 2))
+        run_result = run_collection_once(store=store, limit=limit, retries=retries)
+        results.append({"task_id": task.get("task_id"), "ok": True, "result": run_result})
+    store._audit(
+        "collector.task.process",
+        actor,
+        {"processed": len(results), "queue_backend": collector_task_queue.backend_name()},
+    )
+    return {
+        "status": "ok",
+        "processed": len(results),
+        "remaining_queue_size": collector_task_queue.size(),
+        "results": results,
+    }
 
 
 @app.get("/api/v1/events/feed", response_model=EventFeedResponse)
