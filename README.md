@@ -522,14 +522,14 @@ docker compose up -d
 
 ```bash
 # 示例：启动 API
-uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 6.7 运行核心流程（示例）
 
 ```bash
 python scripts/run_pipeline.py
-python scripts/run_backtest.py
+python scripts/run_backtest.py --start 2024-01-01 --end 2024-12-31 --symbol AAPL --strategy baseline_sentiment
 ```
 
 ---

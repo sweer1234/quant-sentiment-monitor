@@ -1,0 +1,2 @@
+"""Quant sentiment monitor package."""
+
