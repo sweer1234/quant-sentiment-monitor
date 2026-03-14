@@ -435,7 +435,54 @@ def test_event_ingest_and_alert_lifecycle() -> None:
     assert ingest.status_code == 200
     event_id = ingest.json()["event"]["event_id"]
     assert ingest.json()["alert"] is not None
+    assert ingest.json()["deduplicated"] is False
     alert_id = ingest.json()["alert"]["alert_id"]
+
+    duplicate_ingest = client.post(
+        "/api/v1/events/ingest",
+        headers=analyst_headers,
+        json={
+            "source_id": "federal_reserve",
+            "title": "Fed 官方声明偏鹰派",
+            "content": "政策声明强调通胀风险，市场提高加息预期。",
+            "event_type": "central_bank_policy",
+            "related_instruments": ["DXY", "UST10Y"],
+        },
+    )
+    assert duplicate_ingest.status_code == 200
+    assert duplicate_ingest.json()["deduplicated"] is True
+    assert duplicate_ingest.json()["event"]["event_id"] == event_id
+
+    batch_ingest = client.post(
+        "/api/v1/events/batch-ingest",
+        headers=analyst_headers,
+        json={
+            "request_id": "batch-r1",
+            "events": [
+                {
+                    "source_id": "federal_reserve",
+                    "title": "Fed 官方声明偏鹰派",
+                    "content": "政策声明强调通胀风险，市场提高加息预期。",
+                },
+                {
+                    "source_id": "opec",
+                    "title": "OPEC 计划减产",
+                    "content": "部分成员国考虑额外减产，原油供给趋紧。",
+                    "related_instruments": ["CL", "USDCAD"],
+                },
+                {
+                    "source_id": "",
+                    "title": "bad",
+                    "content": "bad",
+                },
+            ],
+        },
+    )
+    assert batch_ingest.status_code == 200
+    assert batch_ingest.json()["total"] == 3
+    assert batch_ingest.json()["accepted"] >= 1
+    assert batch_ingest.json()["deduplicated"] >= 1
+    assert batch_ingest.json()["rejected"] >= 1
 
     event_detail = client.get(f"/api/v1/events/id/{event_id}")
     assert event_detail.status_code == 200
@@ -479,6 +526,8 @@ def test_event_ingest_and_alert_lifecycle() -> None:
     metrics = client.get("/api/v1/metrics/summary", headers=admin_headers)
     assert metrics.status_code == 200
     assert "events_total" in metrics.json()
+    assert "ingest_stats" in metrics.json()
+    assert metrics.json()["ingest_stats"]["total"] >= 1
 
     exported = client.get("/api/v1/admin/state/export", headers=admin_headers)
     assert exported.status_code == 200

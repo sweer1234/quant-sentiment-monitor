@@ -556,6 +556,12 @@ curl -s -X POST "http://127.0.0.1:8000/api/v1/events/ingest" \
 # 告警列表与确认
 curl -s "http://127.0.0.1:8000/api/v1/alerts/feed?importance_min=P1" \
   -H "Authorization: Bearer ${TOKEN}"
+
+# 批量接入（自动去重，返回 accepted/deduplicated/rejected 统计）
+curl -s -X POST "http://127.0.0.1:8000/api/v1/events/batch-ingest" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"request_id":"batch-001","events":[{"source_id":"federal_reserve","title":"Fed 偏鹰派","content":"通胀风险仍高"},{"source_id":"opec","title":"OPEC 计划减产","content":"供给趋紧"}]}'
 ```
 
 ### 6.9 日历/Webhook/RBAC 验收（示例）

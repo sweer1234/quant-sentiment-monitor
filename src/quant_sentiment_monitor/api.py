@@ -10,6 +10,7 @@ from .models import (
     AlertPolicyUpdateRequest,
     AlertSubscriptionsRequest,
     AlertAckRequest,
+    EventBatchIngestRequest,
     EventIngestRequest,
     EventFeedResponse,
     FeedbackRequest,
@@ -163,6 +164,17 @@ def ingest_event(
         return store.ingest_event(request.model_dump(mode="json"))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/events/batch-ingest")
+def batch_ingest_events(
+    request: EventBatchIngestRequest,
+    _: str = Depends(require_permission("events.ingest")),
+) -> dict[str, Any]:
+    return store.batch_ingest_events(
+        payloads=[item.model_dump(mode="json") for item in request.events],
+        request_id=request.request_id,
+    )
 
 
 @app.get("/api/v1/events/feed", response_model=EventFeedResponse)

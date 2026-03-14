@@ -70,6 +70,7 @@ class QuantStore:
         self.revoked_alerts: dict[str, dict[str, Any]] = {}
         self.alert_acks: list[dict[str, Any]] = []
         self.feedback_records: list[dict[str, Any]] = []
+        self.ingest_stats: dict[str, int] = {"total": 0, "deduplicated": 0, "accepted": 0}
         self.webhook_subscriptions: dict[str, dict[str, Any]] = {}
         self.webhook_deliveries: list[dict[str, Any]] = []
         self.webhook_queue: list[dict[str, Any]] = []
@@ -145,6 +146,7 @@ class QuantStore:
             "user_alert_subscriptions": self.user_alert_subscriptions,
             "user_topic_subscriptions": {k: sorted(v) for k, v in self.user_topic_subscriptions.items()},
             "feedback_records": self.feedback_records,
+            "ingest_stats": self.ingest_stats,
             "webhook_subscriptions": list(self.webhook_subscriptions.values()),
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,
@@ -173,6 +175,7 @@ class QuantStore:
             self.user_alert_subscriptions = dict(payload.get("user_alert_subscriptions", {}))
             self.user_topic_subscriptions = {k: set(v) for k, v in dict(payload.get("user_topic_subscriptions", {})).items()}
             self.feedback_records = list(payload.get("feedback_records", []))
+            self.ingest_stats = dict(payload.get("ingest_stats", {"total": 0, "deduplicated": 0, "accepted": 0}))
             self.webhook_subscriptions = {
                 item["subscription_id"]: item for item in payload.get("webhook_subscriptions", []) if "subscription_id" in item
             }
@@ -315,7 +318,32 @@ class QuantStore:
         self.alerts[alert_id] = alert
         return alert
 
+    def _find_duplicate_event(
+        self,
+        *,
+        source_id: str,
+        title: str,
+        content: str,
+        published_at: datetime | None,
+    ) -> Event | None:
+        normalized_title = title.strip().lower()
+        normalized_content = content.strip().lower()
+        window_minutes = int(self.alert_policies.get("dedup_window_minutes", 45))
+        baseline = published_at or now_utc()
+        for event in self.events.values():
+            if event.source_id != source_id:
+                continue
+            if event.title.strip().lower() != normalized_title:
+                continue
+            if event.content.strip().lower() != normalized_content:
+                continue
+            if abs((event.published_at - baseline).total_seconds()) > window_minutes * 60:
+                continue
+            return event
+        return None
+
     def ingest_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.ingest_stats["total"] = int(self.ingest_stats.get("total", 0)) + 1
         source_id = str(payload.get("source_id", "")).strip()
         if not source_id:
             raise ValueError("source_id required")
@@ -328,6 +356,19 @@ class QuantStore:
             if not allowed:
                 raise ValueError(f"compliance blocked external publish: {reason}")
 
+        published_at = None
+        if payload.get("published_at"):
+            published_at = datetime.fromisoformat(str(payload["published_at"]))
+        duplicate = self._find_duplicate_event(source_id=source_id, title=title, content=content, published_at=published_at)
+        if duplicate:
+            self.ingest_stats["deduplicated"] = int(self.ingest_stats.get("deduplicated", 0)) + 1
+            self._persist_state()
+            return {
+                "event": duplicate.model_dump(mode="json"),
+                "alert": None,
+                "deduplicated": True,
+            }
+
         event = self._build_event(
             source_id=source_id,
             title=title,
@@ -338,8 +379,8 @@ class QuantStore:
             event.event_type = str(payload["event_type"])
         if payload.get("language"):
             event.language = str(payload["language"])
-        if payload.get("published_at"):
-            event.published_at = datetime.fromisoformat(str(payload["published_at"]))
+        if published_at:
+            event.published_at = published_at
         if payload.get("credibility_level"):
             event.credibility_level = str(payload["credibility_level"])
         if payload.get("evidence"):
@@ -347,10 +388,37 @@ class QuantStore:
 
         self.events[event.event_id] = event
         alert = self._create_alert_for_event(event)
+        self.ingest_stats["accepted"] = int(self.ingest_stats.get("accepted", 0)) + 1
         self._persist_state()
         return {
             "event": event.model_dump(mode="json"),
             "alert": deepcopy(alert) if alert else None,
+            "deduplicated": False,
+        }
+
+    def batch_ingest_events(self, payloads: list[dict[str, Any]], request_id: str | None = None) -> dict[str, Any]:
+        results = []
+        accepted = 0
+        deduplicated = 0
+        rejected = 0
+        for item in payloads:
+            try:
+                result = self.ingest_event(item)
+                results.append({"ok": True, **result})
+                if result.get("deduplicated"):
+                    deduplicated += 1
+                else:
+                    accepted += 1
+            except Exception as exc:
+                rejected += 1
+                results.append({"ok": False, "error": str(exc), "event": item})
+        return {
+            "request_id": request_id,
+            "total": len(payloads),
+            "accepted": accepted,
+            "deduplicated": deduplicated,
+            "rejected": rejected,
+            "results": results,
         }
 
     def _seed_calendar_events(self) -> None:
@@ -1470,6 +1538,7 @@ class QuantStore:
             "alerts_acked": acked_alerts,
             "users_total": len(self.users),
             "feedback_total": len(self.feedback_records),
+            "ingest_stats": self.ingest_stats,
             "webhook": webhook,
         }
 
@@ -1483,6 +1552,7 @@ class QuantStore:
             "user_alert_subscriptions": self.user_alert_subscriptions,
             "user_topic_subscriptions": {k: sorted(v) for k, v in self.user_topic_subscriptions.items()},
             "feedback_records": self.feedback_records,
+            "ingest_stats": self.ingest_stats,
             "webhook_subscriptions": list(self.webhook_subscriptions.values()),
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,

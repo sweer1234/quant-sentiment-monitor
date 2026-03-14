@@ -227,5 +227,10 @@ class EventIngestRequest(BaseModel):
     publish_external: bool = False
 
 
+class EventBatchIngestRequest(BaseModel):
+    request_id: str | None = None
+    events: list[EventIngestRequest]
+
+
 class AlertAckRequest(BaseModel):
     note: str = ""
