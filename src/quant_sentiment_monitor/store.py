@@ -78,6 +78,7 @@ class QuantStore:
         self.webhook_deliveries: list[dict[str, Any]] = []
         self.webhook_queue: list[dict[str, Any]] = []
         self.webhook_dlq: list[dict[str, Any]] = []
+        self.webhook_queue_paused: bool = False
         self.calendar_events: dict[str, dict[str, Any]] = {}
         self._source_by_id: dict[str, dict[str, Any]] = {}
         self.reload_configs()
@@ -157,6 +158,7 @@ class QuantStore:
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,
             "webhook_dlq": self.webhook_dlq,
+            "webhook_queue_paused": self.webhook_queue_paused,
             "calendar_events": list(self.calendar_events.values()),
         }
         with state_file.open("w", encoding="utf-8") as f:
@@ -191,6 +193,7 @@ class QuantStore:
             self.webhook_deliveries = list(payload.get("webhook_deliveries", []))
             self.webhook_queue = list(payload.get("webhook_queue", []))
             self.webhook_dlq = list(payload.get("webhook_dlq", []))
+            self.webhook_queue_paused = bool(payload.get("webhook_queue_paused", False))
             self.calendar_events = {
                 item["calendar_event_id"]: item for item in payload.get("calendar_events", []) if "calendar_event_id" in item
             }
@@ -778,18 +781,39 @@ class QuantStore:
         *,
         action: str | None = None,
         actor: str | None = None,
+        from_time: datetime | None = None,
+        to_time: datetime | None = None,
+        offset: int = 0,
         limit: int = 200,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         rows = []
         for item in reversed(self.audit_logs):
+            created_at_raw = item.get("created_at")
+            created_at = None
+            if created_at_raw:
+                try:
+                    created_at = datetime.fromisoformat(str(created_at_raw))
+                except Exception:
+                    created_at = None
             if action and str(item.get("action")) != action:
                 continue
             if actor and str(item.get("actor")) != actor:
                 continue
+            if from_time and (created_at is None or created_at < from_time):
+                continue
+            if to_time and (created_at is None or created_at > to_time):
+                continue
             rows.append(deepcopy(item))
-            if len(rows) >= limit:
-                break
-        return rows
+        total = len(rows)
+        if offset > 0:
+            rows = rows[offset:]
+        rows = rows[:limit]
+        return {
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "logs": rows,
+        }
 
     def get_user_profile(self, username: str) -> dict[str, Any]:
         user = self.users.get(username, {"role": "analyst"})
@@ -1037,37 +1061,92 @@ class QuantStore:
             defaults["P2"] = int(esc["p2_unacked_escalate_minutes"])
         return defaults.get(level, 10)
 
+    def _alert_escalation_min_level(self) -> str:
+        esc = self.alert_governance_rules.get("escalation", {})
+        level = str(esc.get("min_importance_level", "P2")).upper()
+        if level not in {"P0", "P1", "P2"}:
+            return "P2"
+        return level
+
+    def _alert_escalation_max_count(self, level: str) -> int:
+        esc = self.alert_governance_rules.get("escalation", {})
+        defaults = {"P0": 3, "P1": 2, "P2": 1}
+        by_level = esc.get("max_count_per_alert_by_level", {})
+        if isinstance(by_level, dict):
+            for key in ("P0", "P1", "P2"):
+                value = by_level.get(key)
+                if isinstance(value, (int, float)):
+                    defaults[key] = max(1, int(value))
+        return defaults.get(level, 1)
+
+    def _alert_escalation_channels(self, level: str) -> list[str]:
+        esc = self.alert_governance_rules.get("escalation", {})
+        defaults = {
+            "P0": ["app", "im", "email", "phone"],
+            "P1": ["app", "im", "email"],
+            "P2": ["app", "im"],
+        }
+        channels_map = esc.get("channels_by_level", {})
+        channels = None
+        if isinstance(channels_map, dict):
+            channels = channels_map.get(level)
+        if not channels:
+            channels = defaults.get(level) or self.alert_policies.get("channels_order", ["app", "im", "email"])
+        if not isinstance(channels, list) or not channels:
+            return ["app", "im", "email"]
+        return [str(item) for item in channels]
+
     def escalate_alerts(self, *, actor: str, limit: int = 100, force: bool = False) -> dict[str, Any]:
         escalated = 0
         skipped = 0
+        skipped_by_level_threshold = 0
+        skipped_by_max_count = 0
         now = now_utc()
+        min_level = self._alert_escalation_min_level()
+        min_rank = self._alert_level_rank(min_level)
         for alert in sorted(self.alerts.values(), key=lambda item: item.get("created_at", "")):
             if escalated >= limit:
                 break
-            if alert.get("status") not in {"active"}:
+            if alert.get("status") not in {"active", "escalated"}:
                 skipped += 1
                 continue
             if alert.get("acked_at") is not None:
                 skipped += 1
                 continue
-            created_at = datetime.fromisoformat(str(alert.get("created_at")))
+
+            level = str(alert.get("importance_level", "P2"))
+            if self._alert_level_rank(level) < min_rank:
+                skipped_by_level_threshold += 1
+                continue
+
+            threshold = self._alert_escalation_minutes(level)
+            max_count = self._alert_escalation_max_count(level)
+            existing_count = int(alert.get("escalation_count", 0))
+            if existing_count >= max_count:
+                skipped_by_max_count += 1
+                continue
+
+            baseline_raw = alert.get("escalated_at") or alert.get("created_at")
+            created_at = datetime.fromisoformat(str(baseline_raw))
             age_minutes = (now - created_at).total_seconds() / 60
-            threshold = self._alert_escalation_minutes(str(alert.get("importance_level", "P2")))
             if not force and age_minutes < threshold:
                 skipped += 1
                 continue
+
             alert["status"] = "escalated"
             alert["escalated_at"] = now.isoformat()
             alert["updated_at"] = now.isoformat()
-            alert["escalation_count"] = int(alert.get("escalation_count", 0)) + 1
-            alert["escalation_channels"] = self.alert_policies.get("channels_order", ["app", "im", "email", "phone"])
+            alert["escalation_count"] = existing_count + 1
+            alert["escalation_channels"] = self._alert_escalation_channels(level)
             escalation = {
                 "escalation_id": f"esc_{uuid4().hex[:10]}",
                 "alert_id": alert["alert_id"],
                 "event_id": alert.get("event_id"),
-                "importance_level": alert.get("importance_level"),
+                "importance_level": level,
                 "age_minutes": round(age_minutes, 2),
                 "threshold_minutes": threshold,
+                "escalation_count": alert["escalation_count"],
+                "max_count": max_count,
                 "channels": alert["escalation_channels"],
                 "actor": actor,
                 "created_at": now.isoformat(),
@@ -1075,9 +1154,28 @@ class QuantStore:
             self.alert_escalations.append(escalation)
             escalated += 1
 
-        self._audit("alert.escalate", actor, {"escalated": escalated, "skipped": skipped, "force": force, "limit": limit})
+        self._audit(
+            "alert.escalate",
+            actor,
+            {
+                "escalated": escalated,
+                "skipped": skipped,
+                "skipped_by_level_threshold": skipped_by_level_threshold,
+                "skipped_by_max_count": skipped_by_max_count,
+                "force": force,
+                "limit": limit,
+                "min_importance_level": min_level,
+            },
+        )
         self._persist_state()
-        return {"status": "ok", "escalated": escalated, "skipped": skipped}
+        return {
+            "status": "ok",
+            "escalated": escalated,
+            "skipped": skipped,
+            "skipped_by_level_threshold": skipped_by_level_threshold,
+            "skipped_by_max_count": skipped_by_max_count,
+            "min_importance_level": min_level,
+        }
 
     def list_alert_escalations(self, *, limit: int = 100) -> list[dict[str, Any]]:
         return [deepcopy(item) for item in sorted(self.alert_escalations, key=lambda x: x.get("created_at", ""), reverse=True)[:limit]]
@@ -1502,7 +1600,30 @@ class QuantStore:
         self._persist_state()
         return {"status": "ok", "replayed": replayed, "queue_size": len(self.webhook_queue)}
 
+    def set_webhook_queue_paused(self, paused: bool, *, actor: str) -> dict[str, Any]:
+        self.webhook_queue_paused = paused
+        self._audit("webhook.queue.pause" if paused else "webhook.queue.resume", actor, {"paused": paused})
+        self._persist_state()
+        return {
+            "status": "ok",
+            "paused": self.webhook_queue_paused,
+            "queue_size": len(self.webhook_queue),
+            "dlq_size": len(self.webhook_dlq),
+        }
+
     def process_webhook_queue(self, *, limit: int = 50, ignore_schedule: bool = False) -> dict[str, Any]:
+        if self.webhook_queue_paused:
+            return {
+                "status": "paused",
+                "paused": True,
+                "processed": 0,
+                "delivered": 0,
+                "failed": 0,
+                "requeued": 0,
+                "throttled": 0,
+                "dlq_moved": 0,
+                "queue_size": len(self.webhook_queue),
+            }
         processed = 0
         delivered = 0
         failed = 0
@@ -1654,6 +1775,7 @@ class QuantStore:
             "dlq_total": dlq,
             "queue_size": len(self.webhook_queue),
             "dlq_size": len(self.webhook_dlq),
+            "queue_paused": self.webhook_queue_paused,
             "success_rate_pct": success_rate,
             "retry_count_p50": retry_p50,
             "retry_count_p95": retry_p95,
@@ -1748,6 +1870,7 @@ class QuantStore:
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,
             "webhook_dlq": self.webhook_dlq,
+            "webhook_queue_paused": self.webhook_queue_paused,
             "calendar_events": list(self.calendar_events.values()),
         }
 
@@ -1766,6 +1889,7 @@ class QuantStore:
             self.webhook_deliveries = []
             self.webhook_queue = []
             self.webhook_dlq = []
+            self.webhook_queue_paused = False
             self.calendar_events = {}
 
         imported_events = 0
@@ -1805,6 +1929,7 @@ class QuantStore:
         self.webhook_deliveries.extend(payload.get("webhook_deliveries", []))
         self.webhook_queue.extend(payload.get("webhook_queue", []))
         self.webhook_dlq.extend(payload.get("webhook_dlq", []))
+        self.webhook_queue_paused = bool(payload.get("webhook_queue_paused", self.webhook_queue_paused))
         for item in payload.get("calendar_events", []):
             if "calendar_event_id" in item:
                 self.calendar_events[item["calendar_event_id"]] = item
@@ -1844,6 +1969,7 @@ class QuantStore:
         self.webhook_deliveries = []
         self.webhook_queue = []
         self.webhook_dlq = []
+        self.webhook_queue_paused = False
         self.calendar_events = {}
         if reseed:
             self._seed_events()

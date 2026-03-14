@@ -335,6 +335,23 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     assert throttled_deliveries.status_code == 200
     assert throttled_deliveries.json()["total"] >= 1
 
+    pause_queue = client.post("/api/v1/webhooks/queue/pause", headers=admin_headers)
+    assert pause_queue.status_code == 200
+    assert pause_queue.json()["paused"] is True
+    process_when_paused = client.post("/api/v1/webhooks/queue/process?limit=10&ignore_schedule=true", headers=admin_headers)
+    assert process_when_paused.status_code == 200
+    assert process_when_paused.json()["status"] == "paused"
+    assert process_when_paused.json()["paused"] is True
+    paused_stats = client.get("/api/v1/webhooks/stats", headers=admin_headers)
+    assert paused_stats.status_code == 200
+    assert paused_stats.json()["queue_paused"] is True
+    resume_queue = client.post("/api/v1/webhooks/queue/resume", headers=admin_headers)
+    assert resume_queue.status_code == 200
+    assert resume_queue.json()["paused"] is False
+    resumed_stats = client.get("/api/v1/webhooks/stats", headers=admin_headers)
+    assert resumed_stats.status_code == 200
+    assert resumed_stats.json()["queue_paused"] is False
+
     delete_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{webhook_id}", headers=admin_headers)
     assert delete_webhook.status_code == 200
     delete_failing_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{failing_id}", headers=admin_headers)
@@ -425,6 +442,10 @@ def test_auth_and_permission_denied_paths() -> None:
     assert denied_webhook_dlq.status_code == 403
     denied_webhook_replay = client.post("/api/v1/webhooks/dlq/replay", headers=analyst_headers)
     assert denied_webhook_replay.status_code == 403
+    denied_webhook_pause = client.post("/api/v1/webhooks/queue/pause", headers=analyst_headers)
+    assert denied_webhook_pause.status_code == 403
+    denied_webhook_resume = client.post("/api/v1/webhooks/queue/resume", headers=analyst_headers)
+    assert denied_webhook_resume.status_code == 403
     denied_alert_escalate = client.post("/api/v1/alerts/escalate", headers=analyst_headers)
     assert denied_alert_escalate.status_code == 403
     denied_alert_escalations = client.get("/api/v1/alerts/escalations", headers=analyst_headers)
@@ -576,6 +597,21 @@ def test_event_ingest_and_alert_lifecycle() -> None:
     audits = client.get("/api/v1/audit/logs?limit=20", headers=admin_headers)
     assert audits.status_code == 200
     assert audits.json()["total"] >= 1
+    assert "offset" in audits.json()
+
+    audit_page_2 = client.get("/api/v1/audit/logs?limit=5&offset=1", headers=admin_headers)
+    assert audit_page_2.status_code == 200
+    assert audit_page_2.json()["offset"] == 1
+    assert audit_page_2.json()["total"] >= len(audit_page_2.json()["logs"])
+
+    audit_action = client.get("/api/v1/audit/logs?action=auth.login&limit=50", headers=admin_headers)
+    assert audit_action.status_code == 200
+    assert audit_action.json()["total"] >= 1
+    assert all(item["action"] == "auth.login" for item in audit_action.json()["logs"])
+
+    audit_future = client.get("/api/v1/audit/logs?from=2099-01-01T00:00:00%2B00:00&limit=20", headers=admin_headers)
+    assert audit_future.status_code == 200
+    assert audit_future.json()["total"] == 0
 
     exported = client.get("/api/v1/admin/state/export", headers=admin_headers)
     assert exported.status_code == 200

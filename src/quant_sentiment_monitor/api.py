@@ -509,11 +509,20 @@ def reset_state(
 def audit_logs(
     action: str | None = Query(default=None),
     actor: str | None = Query(default=None),
+    from_time: datetime | None = Query(default=None, alias="from"),
+    to_time: datetime | None = Query(default=None, alias="to"),
+    offset: int = Query(default=0, ge=0),
     limit: int = Query(default=200, ge=1, le=1000),
     _: str = Depends(require_permission("audit.read")),
 ) -> dict[str, Any]:
-    rows = store.list_audit_logs(action=action, actor=actor, limit=limit)
-    return {"total": len(rows), "logs": rows}
+    return store.list_audit_logs(
+        action=action,
+        actor=actor,
+        from_time=from_time,
+        to_time=to_time,
+        offset=offset,
+        limit=limit,
+    )
 
 
 @app.get("/api/v1/calendar/events")
@@ -626,6 +635,16 @@ def process_webhook_queue(
     _: str = Depends(require_permission("webhooks.manage")),
 ) -> dict[str, Any]:
     return store.process_webhook_queue(limit=limit, ignore_schedule=ignore_schedule)
+
+
+@app.post("/api/v1/webhooks/queue/pause")
+def pause_webhook_queue(actor: str = Depends(require_permission("webhooks.manage"))) -> dict[str, Any]:
+    return store.set_webhook_queue_paused(True, actor=actor)
+
+
+@app.post("/api/v1/webhooks/queue/resume")
+def resume_webhook_queue(actor: str = Depends(require_permission("webhooks.manage"))) -> dict[str, Any]:
+    return store.set_webhook_queue_paused(False, actor=actor)
 
 
 @app.get("/api/v1/webhooks/stats")

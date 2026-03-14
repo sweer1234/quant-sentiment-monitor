@@ -13,6 +13,20 @@ suppression:
     P1: 10
     P2: 30
 
+escalation:
+  p0_unacked_escalate_minutes: 3
+  p1_unacked_escalate_minutes: 10
+  p2_unacked_escalate_minutes: 30
+  min_importance_level: P2
+  max_count_per_alert_by_level:
+    P0: 3
+    P1: 2
+    P2: 1
+  channels_by_level:
+    P0: [app, im, email, phone]
+    P1: [app, im, email]
+    P2: [app, im]
+
 correction_and_recall:
   enabled: true
   allow_revoke: true
