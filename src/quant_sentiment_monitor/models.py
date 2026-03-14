@@ -223,6 +223,7 @@ class EventIngestRequest(BaseModel):
     related_instruments: list[str] = Field(default_factory=list)
     credibility_level: Literal["official", "verified", "rumor"] = "verified"
     evidence: list[str] = Field(default_factory=list)
+    publish_external: bool = False
 
 
 class AlertAckRequest(BaseModel):

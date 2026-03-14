@@ -365,6 +365,8 @@ def test_auth_and_permission_denied_paths() -> None:
     assert denied_webhook_process.status_code == 403
     denied_webhook_stats = client.get("/api/v1/webhooks/stats", headers=analyst_headers)
     assert denied_webhook_stats.status_code == 403
+    denied_metrics = client.get("/api/v1/metrics/summary", headers=analyst_headers)
+    assert denied_metrics.status_code == 403
 
     # Missing token should fail.
     no_token = client.get("/api/v1/users/me")
@@ -420,3 +422,23 @@ def test_event_ingest_and_alert_lifecycle() -> None:
         },
     )
     assert denied_ingest.status_code == 401
+
+    compliance_block = client.post(
+        "/api/v1/events/ingest",
+        headers=analyst_headers,
+        json={
+            "source_id": "unknown_external_source",
+            "title": "外部分发合规测试",
+            "content": "尝试分发未知来源",
+            "publish_external": True,
+        },
+    )
+    assert compliance_block.status_code == 422
+
+    metrics = client.get("/api/v1/metrics/summary", headers=admin_headers)
+    assert metrics.status_code == 200
+    assert "events_total" in metrics.json()
+
+    exported = client.get("/api/v1/admin/state/export", headers=admin_headers)
+    assert exported.status_code == 200
+    assert "events" in exported.json()

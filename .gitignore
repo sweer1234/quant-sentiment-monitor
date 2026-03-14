@@ -10,6 +10,7 @@ __pycache__/
 .Python
 build/
 artifacts/
+data/*.json
 develop-eggs/
 dist/
 downloads/

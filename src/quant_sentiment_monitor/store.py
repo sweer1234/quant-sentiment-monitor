@@ -320,6 +320,10 @@ class QuantStore:
         content = str(payload.get("content", "")).strip()
         if not title or not content:
             raise ValueError("title/content required")
+        if bool(payload.get("publish_external", False)):
+            allowed, reason = self.can_publish_source_externally(source_id)
+            if not allowed:
+                raise ValueError(f"compliance blocked external publish: {reason}")
 
         event = self._build_event(
             source_id=source_id,
@@ -650,6 +654,7 @@ class QuantStore:
                 "calendar.manage",
                 "feedback.write",
                 "events.ingest",
+                "admin.state",
             },
             "trader": {"alerts.revoke", "alerts.ack", "feedback.write", "webhooks.manage", "events.ingest"},
             "analyst": {"alerts.ack", "feedback.write", "events.ingest"},
@@ -804,6 +809,23 @@ class QuantStore:
         source_items = {item.get("source_id"): item for item in self.source_compliance_registry.get("sources", [])}
         detail = deepcopy(source_items.get(source_id, {}))
         return {"source_id": source_id, "default_policy": default_policy, "compliance": detail}
+
+    def can_publish_source_externally(self, source_id: str) -> tuple[bool, str]:
+        compliance = self.source_compliance(source_id)
+        default_policy = compliance.get("default_policy", {})
+        detail = compliance.get("compliance", {})
+        usage_scope = str(detail.get("usage_scope", ""))
+        redistribution = str(detail.get("redistribution", ""))
+        if not detail:
+            allowed_default = bool(default_policy.get("allowed_for_external_api_redistribution", False))
+            if not allowed_default:
+                return False, "source has no explicit external redistribution permission"
+            return True, "allowed_by_default_policy"
+        if usage_scope == "internal_research_only":
+            return False, "usage scope is internal_research_only"
+        if redistribution in {"restricted"}:
+            return False, "redistribution is restricted"
+        return True, "allowed"
 
     def update_alert_policies(self, payload: dict[str, Any]) -> dict[str, Any]:
         for key, value in payload.items():
@@ -1286,4 +1308,43 @@ class QuantStore:
             "retry_count_p50": retry_p50,
             "retry_count_p95": retry_p95,
             "retry_policy": self._webhook_retry_policy(),
+        }
+
+    def metrics_summary(self) -> dict[str, Any]:
+        webhook = self.webhook_stats()
+        events = list(self.events.values())
+        avg_importance = round(sum(item.importance_score for item in events) / len(events), 2) if events else 0.0
+        p0_count = sum(1 for item in events if item.importance_level == "P0")
+        p1_count = sum(1 for item in events if item.importance_level == "P1")
+        p2_count = sum(1 for item in events if item.importance_level == "P2")
+        active_alerts = sum(1 for item in self.alerts.values() if item.get("status") == "active")
+        acked_alerts = sum(1 for item in self.alerts.values() if item.get("status") == "acked")
+        return {
+            "events_total": len(events),
+            "events_p0": p0_count,
+            "events_p1": p1_count,
+            "events_p2": p2_count,
+            "events_avg_importance": avg_importance,
+            "alerts_total": len(self.alerts),
+            "alerts_active": active_alerts,
+            "alerts_acked": acked_alerts,
+            "users_total": len(self.users),
+            "feedback_total": len(self.feedback_records),
+            "webhook": webhook,
+        }
+
+    def export_state_snapshot(self) -> dict[str, Any]:
+        return {
+            "events": [event.model_dump(mode="json") for event in self.events.values()],
+            "manual_messages": [item.model_dump(mode="json") for item in self.manual_messages.values()],
+            "alerts": list(self.alerts.values()),
+            "alert_acks": self.alert_acks,
+            "user_preferences": self.user_preferences,
+            "user_alert_subscriptions": self.user_alert_subscriptions,
+            "user_topic_subscriptions": {k: sorted(v) for k, v in self.user_topic_subscriptions.items()},
+            "feedback_records": self.feedback_records,
+            "webhook_subscriptions": list(self.webhook_subscriptions.values()),
+            "webhook_deliveries": self.webhook_deliveries,
+            "webhook_queue": self.webhook_queue,
+            "calendar_events": list(self.calendar_events.values()),
         }

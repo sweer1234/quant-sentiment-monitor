@@ -447,6 +447,16 @@ def sla_status(tenant_id: str = Query(...), _: str = Depends(get_current_user)) 
     return store.sla_status(tenant_id=tenant_id)
 
 
+@app.get("/api/v1/metrics/summary")
+def metrics_summary(_: str = Depends(require_permission("admin.state"))) -> dict[str, Any]:
+    return store.metrics_summary()
+
+
+@app.get("/api/v1/admin/state/export")
+def export_state_snapshot(_: str = Depends(require_permission("admin.state"))) -> dict[str, Any]:
+    return store.export_state_snapshot()
+
+
 @app.get("/api/v1/calendar/events")
 def list_calendar_events(
     country: str | None = Query(default=None),
