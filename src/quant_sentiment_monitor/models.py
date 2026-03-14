@@ -211,3 +211,19 @@ class CalendarEventsQuery(BaseModel):
     importance_min: Literal["P0", "P1", "P2"] | None = None
     from_date: date | None = None
     to_date: date | None = None
+
+
+class EventIngestRequest(BaseModel):
+    source_id: str
+    title: str
+    content: str
+    language: str = "zh"
+    event_type: str | None = None
+    published_at: datetime | None = None
+    related_instruments: list[str] = Field(default_factory=list)
+    credibility_level: Literal["official", "verified", "rumor"] = "verified"
+    evidence: list[str] = Field(default_factory=list)
+
+
+class AlertAckRequest(BaseModel):
+    note: str = ""

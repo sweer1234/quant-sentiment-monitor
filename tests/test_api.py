@@ -361,3 +361,54 @@ def test_auth_and_permission_denied_paths() -> None:
     # Missing token should fail.
     no_token = client.get("/api/v1/users/me")
     assert no_token.status_code == 401
+
+
+def test_event_ingest_and_alert_lifecycle() -> None:
+    admin_headers = _login_headers(username="sweer1234", password="dev123")
+    trader_headers = _login_headers(username="adollman", password="dev123")
+    analyst_headers = _login_headers(username="demo", password="demo123")
+
+    ingest = client.post(
+        "/api/v1/events/ingest",
+        headers=analyst_headers,
+        json={
+            "source_id": "federal_reserve",
+            "title": "Fed 官方声明偏鹰派",
+            "content": "政策声明强调通胀风险，市场提高加息预期。",
+            "event_type": "central_bank_policy",
+            "related_instruments": ["DXY", "UST10Y"],
+            "credibility_level": "official",
+            "evidence": ["https://www.federalreserve.gov/newsevents/pressreleases.htm"],
+        },
+    )
+    assert ingest.status_code == 200
+    event_id = ingest.json()["event"]["event_id"]
+    assert ingest.json()["alert"] is not None
+    alert_id = ingest.json()["alert"]["alert_id"]
+
+    event_detail = client.get(f"/api/v1/events/{event_id}")
+    assert event_detail.status_code == 200
+
+    analyst_alerts = client.get("/api/v1/alerts/feed?importance_min=P2", headers=analyst_headers)
+    assert analyst_alerts.status_code == 200
+    assert analyst_alerts.json()["total"] >= 1
+
+    ack = client.post(f"/api/v1/alerts/{alert_id}/ack", headers=trader_headers, json={"note": "checked"})
+    assert ack.status_code == 200
+    assert ack.json()["status"] == "acked"
+
+    revoke = client.post(f"/api/v1/alerts/{alert_id}/revoke?reason=manual_cancel", headers=admin_headers)
+    assert revoke.status_code == 200
+    revoked_feed = client.get("/api/v1/alerts/feed?status=revoked", headers=admin_headers)
+    assert revoked_feed.status_code == 200
+    assert any(item["alert_id"] == alert_id for item in revoked_feed.json()["alerts"])
+
+    denied_ingest = client.post(
+        "/api/v1/events/ingest",
+        json={
+            "source_id": "federal_reserve",
+            "title": "无token应拒绝",
+            "content": "test",
+        },
+    )
+    assert denied_ingest.status_code == 401

@@ -51,6 +51,7 @@ class QuantStore:
         self.webhook_delivery_rules: dict[str, Any] = {}
         self.events: dict[str, Event] = {}
         self.manual_messages: dict[str, ManualMessageRecord] = {}
+        self.alerts: dict[str, dict[str, Any]] = {}
         self.alert_policies: dict[str, Any] = {
             "dedup_window_minutes": 45,
             "cooldown_minutes": {"P0": 5, "P1": 10, "P2": 30},
@@ -67,6 +68,7 @@ class QuantStore:
         self.user_alert_subscriptions: dict[str, dict[str, Any]] = {}
         self.user_topic_subscriptions: dict[str, set[str]] = {}
         self.revoked_alerts: dict[str, dict[str, Any]] = {}
+        self.alert_acks: list[dict[str, Any]] = []
         self.feedback_records: list[dict[str, Any]] = []
         self.webhook_subscriptions: dict[str, dict[str, Any]] = {}
         self.webhook_deliveries: list[dict[str, Any]] = []
@@ -179,6 +181,113 @@ class QuantStore:
         for source_id, title, content in seeded:
             event = self._build_event(source_id=source_id, title=title, content=content)
             self.events[event.event_id] = event
+            self._create_alert_for_event(event)
+
+    def _event_fingerprint(self, event: Event) -> str:
+        key = "|".join(
+            [
+                event.title.strip().lower(),
+                event.event_type.strip().lower(),
+                ",".join(sorted(item.lower() for item in event.impacted_markets)),
+            ]
+        )
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    def _alert_level_rank(self, level: str) -> int:
+        return {"P0": 3, "P1": 2, "P2": 1}.get(level, 1)
+
+    def _event_matches_user(self, username: str, event: Event) -> bool:
+        preferences = self.user_preferences.get(username, {})
+        keywords = {item.lower() for item in preferences.get("focus_keywords", [])}
+        markets = {item.lower() for item in preferences.get("focus_markets", [])}
+        instruments = {item.upper() for item in preferences.get("focus_instruments", [])}
+        min_level = preferences.get("alert_level_min") or self.user_alert_subscriptions.get(username, {}).get("level_min", "P2")
+        if self._alert_level_rank(event.importance_level) < self._alert_level_rank(str(min_level)):
+            return False
+        if self.user_alert_subscriptions.get(username, {}).get("muted", False):
+            return False
+
+        text = f"{event.title} {event.content}".lower()
+        event_markets = {item.lower() for item in event.impacted_markets}
+        event_instruments = {impact.instrument.upper() for impact in event.impacts}
+        keyword_ok = not keywords or any(keyword in text for keyword in keywords)
+        market_ok = not markets or bool(event_markets & markets)
+        instrument_ok = not instruments or bool(event_instruments & instruments)
+        return keyword_ok and market_ok and instrument_ok
+
+    def _create_alert_for_event(self, event: Event) -> dict[str, Any] | None:
+        threshold = {"P0": 85, "P1": 70, "P2": 0}
+        if event.importance_score < threshold.get(event.importance_level, 0):
+            return None
+
+        dedup_window = int(self.alert_policies.get("dedup_window_minutes", 45))
+        event_fp = self._event_fingerprint(event)
+        now = now_utc()
+        for existing in self.alerts.values():
+            if existing.get("fingerprint") != event_fp:
+                continue
+            created_at = datetime.fromisoformat(str(existing.get("created_at")))
+            if (now - created_at) <= timedelta(minutes=dedup_window):
+                existing["suppressed_duplicates"] = int(existing.get("suppressed_duplicates", 0)) + 1
+                return None
+
+        target_users = []
+        for username in self.users.keys():
+            if self._event_matches_user(username, event):
+                target_users.append(username)
+
+        alert_id = f"al_{uuid4().hex[:10]}"
+        alert = {
+            "alert_id": alert_id,
+            "event_id": event.event_id,
+            "title": event.title,
+            "importance_level": event.importance_level,
+            "importance_score": event.importance_score,
+            "status": "active",
+            "acked_by": None,
+            "acked_at": None,
+            "channels": self.alert_policies.get("channels_order", ["app", "im", "email"]),
+            "target_users": target_users,
+            "fingerprint": event_fp,
+            "suppressed_duplicates": 0,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+        self.alerts[alert_id] = alert
+        return alert
+
+    def ingest_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        source_id = str(payload.get("source_id", "")).strip()
+        if not source_id:
+            raise ValueError("source_id required")
+        title = str(payload.get("title", "")).strip()
+        content = str(payload.get("content", "")).strip()
+        if not title or not content:
+            raise ValueError("title/content required")
+
+        event = self._build_event(
+            source_id=source_id,
+            title=title,
+            content=content,
+            related_instruments=payload.get("related_instruments", []),
+        )
+        if payload.get("event_type"):
+            event.event_type = str(payload["event_type"])
+        if payload.get("language"):
+            event.language = str(payload["language"])
+        if payload.get("published_at"):
+            event.published_at = datetime.fromisoformat(str(payload["published_at"]))
+        if payload.get("credibility_level"):
+            event.credibility_level = str(payload["credibility_level"])
+        if payload.get("evidence"):
+            event.evidence = list(payload.get("evidence", []))
+
+        self.events[event.event_id] = event
+        alert = self._create_alert_for_event(event)
+        return {
+            "event": event.model_dump(mode="json"),
+            "alert": deepcopy(alert) if alert else None,
+        }
 
     def _seed_calendar_events(self) -> None:
         if self.calendar_events:
@@ -352,6 +461,7 @@ class QuantStore:
             event.importance_level = importance_level  # type: ignore[assignment]
             self.events[event.event_id] = event
             record.linked_event_id = event.event_id
+            self._create_alert_for_event(event)
         return record
 
     def review_manual_message(self, manual_message_id: str, action: str) -> ManualMessageRecord | None:
@@ -473,13 +583,15 @@ class QuantStore:
                 "sources.write",
                 "alerts.write",
                 "alerts.revoke",
+                "alerts.ack",
                 "manual.review",
                 "webhooks.manage",
                 "calendar.manage",
                 "feedback.write",
+                "events.ingest",
             },
-            "trader": {"alerts.revoke", "feedback.write", "webhooks.manage"},
-            "analyst": {"feedback.write"},
+            "trader": {"alerts.revoke", "alerts.ack", "feedback.write", "webhooks.manage", "events.ingest"},
+            "analyst": {"alerts.ack", "feedback.write", "events.ingest"},
         }
         return action in permissions.get(role, set())
 
@@ -635,6 +747,48 @@ class QuantStore:
                 self.alert_policies[key] = value
         return deepcopy(self.alert_policies)
 
+    def list_alerts(
+        self,
+        *,
+        username: str | None = None,
+        status: str | None = None,
+        importance_min: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        min_rank = self._alert_level_rank(importance_min or "P2")
+        rows = []
+        for alert in sorted(self.alerts.values(), key=lambda item: item.get("created_at", ""), reverse=True):
+            if status and str(alert.get("status")) != status:
+                continue
+            if self._alert_level_rank(str(alert.get("importance_level", "P2"))) < min_rank:
+                continue
+            if username and username not in set(alert.get("target_users", [])) and self.user_role(username) != "admin":
+                continue
+            rows.append(deepcopy(alert))
+            if len(rows) >= limit:
+                break
+        return rows
+
+    def ack_alert(self, alert_id: str, username: str, note: str = "") -> dict[str, Any] | None:
+        alert = self.alerts.get(alert_id)
+        if not alert:
+            return None
+        if username not in set(alert.get("target_users", [])) and self.user_role(username) != "admin":
+            return None
+        alert["status"] = "acked"
+        alert["acked_by"] = username
+        alert["acked_at"] = now_utc().isoformat()
+        alert["updated_at"] = now_utc().isoformat()
+        self.alert_acks.append(
+            {
+                "alert_id": alert_id,
+                "username": username,
+                "note": note,
+                "acked_at": alert["acked_at"],
+            }
+        )
+        return deepcopy(alert)
+
     def revoke_alert(self, alert_id: str, reason: str) -> dict[str, Any]:
         revoked = {
             "alert_id": alert_id,
@@ -644,6 +798,10 @@ class QuantStore:
             "correction_notice_required": bool(self.alert_governance_rules.get("correction_and_recall", {}).get("correction_notice_required", True)),
         }
         self.revoked_alerts[alert_id] = revoked
+        if alert_id in self.alerts:
+            self.alerts[alert_id]["status"] = "revoked"
+            self.alerts[alert_id]["updated_at"] = revoked["revoked_at"]
+            self.alerts[alert_id]["revoke_reason"] = reason
         return revoked
 
     def add_feedback(self, username: str, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:

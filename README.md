@@ -546,6 +546,16 @@ TOKEN=$(curl -s http://127.0.0.1:8000/api/v1/auth/login \
 # 查询个性化事件流
 curl -s "http://127.0.0.1:8000/api/v1/users/me/feed?page=1&page_size=5" \
   -H "Authorization: Bearer ${TOKEN}"
+
+# 外部事件接入（会自动触发告警判定）
+curl -s -X POST "http://127.0.0.1:8000/api/v1/events/ingest" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"source_id":"federal_reserve","title":"Fed 声明偏鹰派","content":"通胀风险仍高，利率路径上调。","event_type":"central_bank_policy","related_instruments":["DXY","UST10Y"]}'
+
+# 告警列表与确认
+curl -s "http://127.0.0.1:8000/api/v1/alerts/feed?importance_min=P1" \
+  -H "Authorization: Bearer ${TOKEN}"
 ```
 
 ### 6.9 日历/Webhook/RBAC 验收（示例）

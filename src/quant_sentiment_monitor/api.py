@@ -9,6 +9,8 @@ from fastapi.responses import PlainTextResponse
 from .models import (
     AlertPolicyUpdateRequest,
     AlertSubscriptionsRequest,
+    AlertAckRequest,
+    EventIngestRequest,
     EventFeedResponse,
     FeedbackRequest,
     ImpactBatchRequest,
@@ -142,6 +144,25 @@ def get_event_impact(event_id: str) -> dict[str, Any]:
     if not event:
         raise HTTPException(status_code=404, detail="event not found")
     return event.model_dump(mode="json")
+
+
+@app.get("/api/v1/events/{event_id}")
+def get_event_detail(event_id: str) -> dict[str, Any]:
+    event = store.events.get(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="event not found")
+    return event.model_dump(mode="json")
+
+
+@app.post("/api/v1/events/ingest")
+def ingest_event(
+    request: EventIngestRequest,
+    _: str = Depends(require_permission("events.ingest")),
+) -> dict[str, Any]:
+    try:
+        return store.ingest_event(request.model_dump(mode="json"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/v1/events/feed", response_model=EventFeedResponse)
@@ -363,6 +384,29 @@ def get_alert_policies(_: str = Depends(get_current_user)) -> dict[str, Any]:
 @app.put("/api/v1/alerts/policies")
 def put_alert_policies(request: AlertPolicyUpdateRequest, _: str = Depends(require_permission("alerts.write"))) -> dict[str, Any]:
     return store.update_alert_policies(request.model_dump())
+
+
+@app.get("/api/v1/alerts/feed")
+def alerts_feed(
+    status: str | None = Query(default=None),
+    importance_min: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    username: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    alerts = store.list_alerts(username=username, status=status, importance_min=importance_min, limit=limit)
+    return {"total": len(alerts), "alerts": alerts}
+
+
+@app.post("/api/v1/alerts/{alert_id}/ack")
+def ack_alert(
+    alert_id: str,
+    request: AlertAckRequest,
+    username: str = Depends(require_permission("alerts.ack")),
+) -> dict[str, Any]:
+    alert = store.ack_alert(alert_id=alert_id, username=username, note=request.note)
+    if not alert:
+        raise HTTPException(status_code=404, detail="alert not found or not accessible")
+    return alert
 
 
 @app.post("/api/v1/alerts/{alert_id}/revoke")
