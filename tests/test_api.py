@@ -228,3 +228,71 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     assert dispatch.status_code == 200
     delete_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{webhook_id}", headers=admin_headers)
     assert delete_webhook.status_code == 200
+
+
+def test_auth_and_permission_denied_paths() -> None:
+    # Invalid login should be rejected.
+    invalid_login = client.post("/api/v1/auth/login", json={"username": "demo", "password": "wrong"})
+    assert invalid_login.status_code == 401
+
+    analyst_headers = _login_headers(username="demo", password="demo123")
+    trader_headers = _login_headers(username="adollman", password="dev123")
+    admin_headers = _login_headers(username="sweer1234", password="dev123")
+
+    # Analyst cannot manage alert policies.
+    denied_policy = client.put(
+        "/api/v1/alerts/policies",
+        headers=analyst_headers,
+        json={"dedup_window_minutes": 20},
+    )
+    assert denied_policy.status_code == 403
+
+    # Analyst cannot review manual message.
+    create = client.post(
+        "/api/v1/manual/messages",
+        headers=TOKEN,
+        json={
+            "title": "测试权限消息",
+            "content": "权限链路检查",
+            "operator_id": "u_analyst_002",
+            "operator_role": "analyst",
+        },
+    )
+    assert create.status_code == 200
+    mm_id = create.json()["manual_message_id"]
+    denied_review = client.post(
+        f"/api/v1/manual/messages/{mm_id}/review",
+        headers=analyst_headers,
+        json={"action": "approve"},
+    )
+    assert denied_review.status_code == 403
+
+    # Public token keeps backward compatibility for manual review.
+    public_review = client.post(
+        f"/api/v1/manual/messages/{mm_id}/review",
+        headers=TOKEN,
+        json={"action": "approve"},
+    )
+    assert public_review.status_code == 200
+
+    # Trader can revoke alerts but cannot create calendar events.
+    trader_revoke = client.post("/api/v1/alerts/alert_t2/revoke?reason=permission_test", headers=trader_headers)
+    assert trader_revoke.status_code == 200
+    trader_calendar = client.post(
+        "/api/v1/calendar/events",
+        headers=trader_headers,
+        json={"country": "US", "event_name": "ISM PMI", "importance_level": "P1"},
+    )
+    assert trader_calendar.status_code == 403
+
+    # Admin can create calendar event.
+    admin_calendar = client.post(
+        "/api/v1/calendar/events",
+        headers=admin_headers,
+        json={"country": "US", "event_name": "Retail Sales", "importance_level": "P1"},
+    )
+    assert admin_calendar.status_code == 200
+
+    # Missing token should fail.
+    no_token = client.get("/api/v1/users/me")
+    assert no_token.status_code == 401

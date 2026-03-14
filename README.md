@@ -1071,9 +1071,11 @@ python scripts/run_backtest.py \
 ### 12.2 执行命令（示例）
 
 ```bash
-pytest -q
-pytest tests/integration -q
+python3 -m pytest
+bash scripts/run_tests.sh
 ```
+
+CI 已内置：`.github/workflows/tests.yml`（push 到 `main` / PR 自动执行 pytest）。
 
 ### 12.3 质量门禁（建议）
 - PR 必须通过单测与静态检查
