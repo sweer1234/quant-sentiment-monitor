@@ -1,0 +1,17 @@
+version: 1
+last_updated: "2026-03-14"
+description: "Extended investment domain catalog."
+
+domains:
+  - domain_id: macro_policy
+    display_name: "Macro and Policy"
+    priority: P0
+    focus_assets: [fx, bond, global_equity, metals, crypto]
+  - domain_id: credit_and_default
+    display_name: "Credit and Default"
+    priority: P0
+    focus_assets: [credit, bond, stock]
+  - domain_id: volatility_and_tailrisk
+    display_name: "Volatility and Tail Risk"
+    priority: P0
+    focus_assets: [volatility, derivatives, global_equity, crypto]

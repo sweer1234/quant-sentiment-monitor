@@ -36,6 +36,14 @@ class QuantStore:
         self.sources: list[dict[str, Any]] = []
         self.source_weight_rules: dict[str, Any] = {}
         self.manual_input_rules: dict[str, Any] = {}
+        self.multi_user_rules: dict[str, Any] = {}
+        self.topic_taxonomy: dict[str, Any] = {}
+        self.investment_event_catalog: dict[str, Any] = {}
+        self.alert_governance_rules: dict[str, Any] = {}
+        self.source_compliance_registry: dict[str, Any] = {}
+        self.portfolio_impact_rules: dict[str, Any] = {}
+        self.feedback_learning_rules: dict[str, Any] = {}
+        self.billing_sla_rules: dict[str, Any] = {}
         self.events: dict[str, Event] = {}
         self.manual_messages: dict[str, ManualMessageRecord] = {}
         self.alert_policies: dict[str, Any] = {
@@ -44,6 +52,17 @@ class QuantStore:
             "channels_order": ["app", "im", "email"],
             "allow_revoke": True,
         }
+        self.users: dict[str, dict[str, Any]] = {
+            "sweer1234": {"password": "dev123", "role": "admin"},
+            "adollman": {"password": "dev123", "role": "trader"},
+            "demo": {"password": "demo123", "role": "analyst"},
+        }
+        self.tokens: dict[str, str] = {}
+        self.user_preferences: dict[str, dict[str, Any]] = {}
+        self.user_alert_subscriptions: dict[str, dict[str, Any]] = {}
+        self.user_topic_subscriptions: dict[str, set[str]] = {}
+        self.revoked_alerts: dict[str, dict[str, Any]] = {}
+        self.feedback_records: list[dict[str, Any]] = []
         self._source_by_id: dict[str, dict[str, Any]] = {}
         self.reload_configs()
         self._seed_events()
@@ -54,6 +73,14 @@ class QuantStore:
             override_data = _load_yaml(self.settings.source_registry_override_path)
             self.source_weight_rules = _load_yaml(self.settings.source_weight_rules_path)
             self.manual_input_rules = _load_yaml(self.settings.manual_input_rules_path)
+            self.multi_user_rules = _load_yaml(self.settings.multi_user_rules_path)
+            self.topic_taxonomy = _load_yaml(self.settings.topic_taxonomy_path)
+            self.investment_event_catalog = _load_yaml(self.settings.investment_event_catalog_path)
+            self.alert_governance_rules = _load_yaml(self.settings.alert_governance_rules_path)
+            self.source_compliance_registry = _load_yaml(self.settings.source_compliance_registry_path)
+            self.portfolio_impact_rules = _load_yaml(self.settings.portfolio_impact_rules_path)
+            self.feedback_learning_rules = _load_yaml(self.settings.feedback_learning_rules_path)
+            self.billing_sla_rules = _load_yaml(self.settings.billing_sla_rules_path)
 
             defaults = default_data.get("sources", [])
             if not isinstance(defaults, list):
@@ -70,6 +97,14 @@ class QuantStore:
 
             self.sources = list(source_map.values())
             self._source_by_id = {item["source_id"]: item for item in self.sources}
+            self.alert_policies = {
+                "dedup_window_minutes": self.alert_governance_rules.get("deduplication", {}).get("time_window_minutes", 45),
+                "cooldown_minutes": self.alert_governance_rules.get("suppression", {}).get(
+                    "cooldown_minutes", {"P0": 5, "P1": 10, "P2": 30}
+                ),
+                "channels_order": ["app", "im", "email"],
+                "allow_revoke": self.alert_governance_rules.get("correction_and_recall", {}).get("allow_revoke", True),
+            }
             return {
                 "status": "ok",
                 "default_sources_loaded": len(defaults),
@@ -347,3 +382,228 @@ class QuantStore:
                 }
             )
         return result
+
+    def login(self, username: str, password: str) -> dict[str, Any] | None:
+        user = self.users.get(username)
+        if not user or user.get("password") != password:
+            return None
+        access_token = f"token-{username}-{uuid4().hex[:10]}"
+        self.tokens[access_token] = username
+        if username not in self.user_preferences:
+            self.user_preferences[username] = {
+                "focus_domains": [],
+                "focus_keywords": [],
+                "focus_markets": [],
+                "focus_instruments": [],
+                "alert_level_min": "P2",
+            }
+        if username not in self.user_alert_subscriptions:
+            self.user_alert_subscriptions[username] = {"channels": ["app"], "level_min": "P2", "muted": False}
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": int(self.multi_user_rules.get("auth", {}).get("access_token_expire_minutes", 120) * 60),
+            "user": {"username": username, "role": user.get("role", "analyst")},
+        }
+
+    def username_by_token(self, token: str) -> str | None:
+        return self.tokens.get(token)
+
+    def get_user_profile(self, username: str) -> dict[str, Any]:
+        user = self.users.get(username, {"role": "analyst"})
+        return {
+            "username": username,
+            "role": user.get("role", "analyst"),
+            "preferences": deepcopy(self.user_preferences.get(username, {})),
+            "alert_subscriptions": deepcopy(self.user_alert_subscriptions.get(username, {})),
+            "topic_subscriptions": sorted(self.user_topic_subscriptions.get(username, set())),
+        }
+
+    def update_user_preferences(self, username: str, payload: dict[str, Any]) -> dict[str, Any]:
+        current = self.user_preferences.setdefault(
+            username,
+            {"focus_domains": [], "focus_keywords": [], "focus_markets": [], "focus_instruments": [], "alert_level_min": "P2"},
+        )
+        for key, value in payload.items():
+            if value is not None:
+                current[key] = value
+        return deepcopy(current)
+
+    def update_user_alert_subscriptions(self, username: str, payload: dict[str, Any]) -> dict[str, Any]:
+        current = self.user_alert_subscriptions.setdefault(username, {"channels": ["app"], "level_min": "P2", "muted": False})
+        for key, value in payload.items():
+            if value is not None:
+                current[key] = value
+        return deepcopy(current)
+
+    def update_topic_subscriptions(self, username: str, topic_ids: list[str]) -> list[str]:
+        available = {item.get("topic_id") for item in self.topic_taxonomy.get("topics", [])}
+        selected = {topic_id for topic_id in topic_ids if topic_id in available}
+        self.user_topic_subscriptions[username] = selected
+        return sorted(selected)
+
+    def topic_catalog(self) -> list[dict[str, Any]]:
+        return deepcopy(self.topic_taxonomy.get("topics", []))
+
+    def domain_catalog(self) -> list[dict[str, Any]]:
+        return deepcopy(self.investment_event_catalog.get("domains", []))
+
+    def personalized_feed(self, username: str, *, page: int, page_size: int, importance_min: float | None = None) -> dict[str, Any]:
+        preferences = self.user_preferences.get(username, {})
+        keyword_set = {item.lower() for item in preferences.get("focus_keywords", [])}
+        market_set = {item.lower() for item in preferences.get("focus_markets", [])}
+        instrument_set = {item.upper() for item in preferences.get("focus_instruments", [])}
+        domain_set = {item.lower() for item in preferences.get("focus_domains", [])}
+
+        ranked_events = []
+        for event in self.list_events():
+            if importance_min is not None and event.importance_score < importance_min:
+                continue
+            text = f"{event.title} {event.content}".lower()
+            event_markets = {item.lower() for item in event.impacted_markets}
+            event_instruments = {impact.instrument.upper() for impact in event.impacts}
+            domain_match = 1.0 if any(domain in event.event_type.lower() for domain in domain_set) and domain_set else 0.0
+            keyword_match = 1.0 if keyword_set and any(keyword in text for keyword in keyword_set) else 0.0
+            market_match = len(event_markets & market_set) / max(len(market_set), 1) if market_set else 0.0
+            instrument_match = len(event_instruments & instrument_set) / max(len(instrument_set), 1) if instrument_set else 0.0
+            relevance = round(0.40 * domain_match + 0.30 * keyword_match + 0.20 * instrument_match + 0.10 * market_match, 4)
+            payload = event.model_dump(mode="json")
+            payload["user_relevance_score"] = relevance
+            ranked_events.append(payload)
+
+        ranked_events.sort(key=lambda item: (item["user_relevance_score"], item["importance_score"]), reverse=True)
+        start = (page - 1) * page_size
+        return {"page": page, "page_size": page_size, "total": len(ranked_events), "events": ranked_events[start : start + page_size]}
+
+    def topic_feed(self, username: str, topic_ids: list[str], *, page: int, page_size: int) -> dict[str, Any]:
+        selected = set(topic_ids) if topic_ids else self.user_topic_subscriptions.get(username, set())
+        topic_map = {item.get("topic_id"): item for item in self.topic_taxonomy.get("topics", [])}
+        keywords = []
+        for topic_id in selected:
+            keywords.extend(topic_map.get(topic_id, {}).get("keywords", []))
+        keyword_set = {item.lower() for item in keywords}
+
+        result = []
+        for event in self.list_events():
+            text = f"{event.title} {event.content}".lower()
+            if keyword_set and not any(keyword in text for keyword in keyword_set):
+                continue
+            payload = event.model_dump(mode="json")
+            payload["matched_topics"] = sorted(selected)
+            result.append(payload)
+        start = (page - 1) * page_size
+        return {"page": page, "page_size": page_size, "total": len(result), "events": result[start : start + page_size]}
+
+    def portfolio_impact(self, portfolio_id: str, holdings: list[dict[str, Any]], event_ids: list[str]) -> dict[str, Any]:
+        selected_events = [self.events[event_id] for event_id in event_ids if event_id in self.events] if event_ids else list(self.events.values())
+        impact_by_instrument: dict[str, list[ImpactItem]] = defaultdict(list)
+        for event in selected_events:
+            for impact in event.impacts:
+                impact_by_instrument[impact.instrument.upper()].append(impact)
+
+        net_impact = 0.0
+        drivers: list[dict[str, Any]] = []
+        for holding in holdings:
+            instrument = str(holding.get("instrument", "")).upper()
+            weight = float(holding.get("weight", 0.0))
+            impacts = impact_by_instrument.get(instrument, [])
+            if not impacts:
+                continue
+            avg_net = sum(item.net_bias_score for item in impacts) / len(impacts)
+            contribution = avg_net * weight
+            net_impact += contribution
+            drivers.append(
+                {
+                    "instrument": instrument,
+                    "weight": weight,
+                    "avg_net_bias": round(avg_net, 2),
+                    "contribution": round(contribution, 2),
+                    "events_count": len(impacts),
+                }
+            )
+
+        risk_delta = {
+            "equity_beta": round(net_impact / 200, 4),
+            "duration": round(-net_impact / 250, 4),
+            "fx_exposure": round(net_impact / 180, 4),
+            "crypto_var": round(abs(net_impact) / 120, 4),
+        }
+        return {
+            "portfolio_id": portfolio_id,
+            "net_impact_score": round(max(-100.0, min(100.0, net_impact)), 2),
+            "risk_delta": risk_delta,
+            "drivers": sorted(drivers, key=lambda item: abs(item["contribution"]), reverse=True),
+        }
+
+    def event_credibility(self, event_id: str) -> dict[str, Any] | None:
+        event = self.events.get(event_id)
+        if not event:
+            return None
+        source = self._source_by_id.get(event.source_id, {})
+        score = round(
+            0.45 * float(source.get("credibility_weight", 0.75))
+            + 0.35 * float(source.get("source_weight", 0.7))
+            + 0.20 * (1.0 if event.credibility_level == "official" else 0.7),
+            4,
+        )
+        level = "official" if score >= 0.9 else "verified" if score >= 0.65 else "rumor"
+        return {"event_id": event_id, "credibility_score": score, "credibility_level": level, "evidence": event.evidence}
+
+    def source_compliance(self, source_id: str) -> dict[str, Any]:
+        default_policy = self.source_compliance_registry.get("default_policy", {})
+        source_items = {item.get("source_id"): item for item in self.source_compliance_registry.get("sources", [])}
+        detail = deepcopy(source_items.get(source_id, {}))
+        return {"source_id": source_id, "default_policy": default_policy, "compliance": detail}
+
+    def update_alert_policies(self, payload: dict[str, Any]) -> dict[str, Any]:
+        for key, value in payload.items():
+            if value is not None:
+                self.alert_policies[key] = value
+        return deepcopy(self.alert_policies)
+
+    def revoke_alert(self, alert_id: str, reason: str) -> dict[str, Any]:
+        revoked = {
+            "alert_id": alert_id,
+            "status": "revoked",
+            "reason": reason,
+            "revoked_at": now_utc().isoformat(),
+            "correction_notice_required": bool(self.alert_governance_rules.get("correction_and_recall", {}).get("correction_notice_required", True)),
+        }
+        self.revoked_alerts[alert_id] = revoked
+        return revoked
+
+    def add_feedback(self, username: str, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        record = {
+            "feedback_id": f"fb_{uuid4().hex[:10]}",
+            "event_id": event_id,
+            "username": username,
+            "feedback_type": payload.get("feedback_type"),
+            "score": payload.get("score"),
+            "comment": payload.get("comment", ""),
+            "created_at": now_utc().isoformat(),
+        }
+        self.feedback_records.append(record)
+        return record
+
+    def billing_usage(self, tenant_id: str, period: str) -> dict[str, Any]:
+        total_events = len(self.events)
+        total_alerts = len(self.events) + len(self.manual_messages)
+        return {
+            "tenant_id": tenant_id,
+            "period": period,
+            "events_used": total_events,
+            "alerts_used": total_alerts,
+            "plan": "pro",
+            "quota": self.billing_sla_rules.get("tiers", {}).get("pro", {}),
+        }
+
+    def sla_status(self, tenant_id: str) -> dict[str, Any]:
+        pro_sla = self.billing_sla_rules.get("tiers", {}).get("pro", {}).get("sla", {})
+        return {
+            "tenant_id": tenant_id,
+            "availability_target": pro_sla.get("availability", 99.9),
+            "p95_latency_target_ms": pro_sla.get("p95_latency_ms", 1000),
+            "availability_rolling_30d": 99.97,
+            "p95_latency_ms": 680,
+            "status": "healthy",
+        }

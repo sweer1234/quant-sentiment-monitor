@@ -1,0 +1,17 @@
+version: 1
+last_updated: "2026-03-14"
+description: "Global topic taxonomy for thematic feed."
+
+topics:
+  - topic_id: central_bank_policy
+    display_name: "Central Bank Policy"
+    keywords: [rate decision, hawkish, dovish, qe, qt]
+    primary_markets: [fx, bond, metals]
+  - topic_id: crypto_regulation
+    display_name: "Crypto Regulation and Security"
+    keywords: [stablecoin, etf approval, exploit, custody, licensing]
+    primary_markets: [crypto, derivatives]
+  - topic_id: supply_chain_and_freight
+    display_name: "Supply Chain and Freight"
+    keywords: [freight, route disruption, congestion, tariff]
+    primary_markets: [shipping, commodities, stock]

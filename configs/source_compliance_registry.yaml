@@ -1,0 +1,22 @@
+version: 1
+last_updated: "2026-03-14"
+description: "Source compliance and redistribution policy."
+
+default_policy:
+  allowed_for_internal_research: true
+  allowed_for_external_api_redistribution: false
+  requires_attribution: true
+
+sources:
+  - source_id: federal_reserve
+    license_status: public
+    usage_scope: internal_and_customer
+    redistribution: allowed_with_attribution
+  - source_id: reuters
+    license_status: commercial
+    usage_scope: internal_and_customer
+    redistribution: contract_bound
+  - source_id: manual_operator_input
+    license_status: internal
+    usage_scope: internal_and_customer
+    redistribution: allowed_internal_policy

@@ -9,6 +9,13 @@ client = TestClient(app)
 TOKEN = {"Authorization": f"Bearer {settings.public_api_token}"}
 
 
+def _login_headers(username: str = "demo", password: str = "demo123") -> dict[str, str]:
+    response = client.post("/api/v1/auth/login", json={"username": username, "password": password})
+    assert response.status_code == 200
+    access_token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {access_token}"}
+
+
 def test_health() -> None:
     response = client.get("/api/v1/health")
     assert response.status_code == 200
@@ -97,3 +104,86 @@ def test_manual_message_flow() -> None:
         headers=TOKEN,
     )
     assert reevaluate.status_code == 200
+
+
+def test_user_topic_portfolio_alert_and_sla_flow() -> None:
+    headers = _login_headers()
+    me = client.get("/api/v1/users/me", headers=headers)
+    assert me.status_code == 200
+    assert me.json()["username"] == "demo"
+
+    pref = client.put(
+        "/api/v1/users/me/preferences",
+        headers=headers,
+        json={
+            "focus_domains": ["macro_policy"],
+            "focus_keywords": ["加息", "减产"],
+            "focus_markets": ["fx", "futures"],
+            "focus_instruments": ["DXY", "CL"],
+            "alert_level_min": "P1",
+        },
+    )
+    assert pref.status_code == 200
+
+    feed = client.get("/api/v1/users/me/feed?page=1&page_size=10", headers=headers)
+    assert feed.status_code == 200
+    assert "events" in feed.json()
+
+    topics = client.get("/api/v1/topics/catalog")
+    assert topics.status_code == 200
+    topic_ids = [item["topic_id"] for item in topics.json()["topics"][:1]]
+    sub = client.put("/api/v1/users/me/topic-subscriptions", headers=headers, json={"topic_ids": topic_ids})
+    assert sub.status_code == 200
+
+    topic_feed = client.get("/api/v1/users/me/topic-feed?page=1&page_size=5", headers=headers)
+    assert topic_feed.status_code == 200
+
+    domains = client.get("/api/v1/domains/catalog")
+    assert domains.status_code == 200
+    assert domains.json()["total"] >= 1
+
+    event_id = client.get("/api/v1/events/feed?page=1&page_size=1").json()["events"][0]["event_id"]
+    credibility = client.get(f"/api/v1/events/{event_id}/credibility")
+    assert credibility.status_code == 200
+
+    portfolio = client.post(
+        "/api/v1/portfolio/impact",
+        headers=headers,
+        json={
+            "portfolio_id": "p_demo",
+            "holdings": [{"instrument": "DXY", "weight": 0.3}, {"instrument": "CL", "weight": 0.4}],
+            "event_ids": [],
+        },
+    )
+    assert portfolio.status_code == 200
+    assert "net_impact_score" in portfolio.json()
+
+    policies = client.get("/api/v1/alerts/policies", headers=headers)
+    assert policies.status_code == 200
+
+    update = client.put(
+        "/api/v1/alerts/policies",
+        headers=headers,
+        json={"dedup_window_minutes": 30, "allow_revoke": True},
+    )
+    assert update.status_code == 200
+    assert update.json()["dedup_window_minutes"] == 30
+
+    revoke = client.post("/api/v1/alerts/alert_test_001/revoke?reason=test", headers=headers)
+    assert revoke.status_code == 200
+    assert revoke.json()["status"] == "revoked"
+
+    compliance = client.get("/api/v1/sources/federal_reserve/compliance")
+    assert compliance.status_code == 200
+
+    feedback = client.post(
+        f"/api/v1/feedback/events/{event_id}",
+        headers=headers,
+        json={"feedback_type": "helpful", "score": 5, "comment": "good"},
+    )
+    assert feedback.status_code == 200
+
+    billing = client.get("/api/v1/billing/usage?tenant_id=t001&period=2026-03", headers=headers)
+    assert billing.status_code == 200
+    sla = client.get("/api/v1/sla/status?tenant_id=t001", headers=headers)
+    assert sla.status_code == 200

@@ -532,6 +532,22 @@ python scripts/run_pipeline.py
 python scripts/run_backtest.py --start 2024-01-01 --end 2024-12-31 --symbol AAPL --strategy baseline_sentiment
 ```
 
+### 6.8 API 快速验收（示例）
+
+```bash
+# 健康检查
+curl -s http://127.0.0.1:8000/api/v1/health
+
+# 登录获取访问令牌（内置测试账号：demo/demo123）
+TOKEN=$(curl -s http://127.0.0.1:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"demo","password":"demo123"}' | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])")
+
+# 查询个性化事件流
+curl -s "http://127.0.0.1:8000/api/v1/users/me/feed?page=1&page_size=5" \
+  -H "Authorization: Bearer ${TOKEN}"
+```
+
 ---
 
 ## 7. 配置说明

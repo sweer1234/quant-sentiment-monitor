@@ -1,0 +1,26 @@
+version: 1
+last_updated: "2026-03-14"
+description: "Rules for auth, tenant preference and personalization."
+
+auth:
+  enabled: true
+  providers: [password]
+  access_token_expire_minutes: 120
+  refresh_token_expire_days: 7
+
+rbac:
+  roles:
+    - admin
+    - analyst
+    - trader
+  default_role: analyst
+
+user_preferences:
+  supported_markets: [fx, global_equity, stock, futures, bond, metals, crypto, derivatives]
+  supported_domains: [macro_policy, credit_and_default, crypto_regulation, volatility_and_tailrisk]
+  max_keywords: 50
+
+personalization:
+  formula: "0.40*domain_match + 0.30*keyword_match + 0.20*instrument_match + 0.10*market_match"
+  min_score: 0.0
+  max_score: 1.0

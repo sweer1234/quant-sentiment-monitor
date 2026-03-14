@@ -7,15 +7,22 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
 from fastapi.responses import PlainTextResponse
 
 from .models import (
+    AlertPolicyUpdateRequest,
+    AlertSubscriptionsRequest,
     EventFeedResponse,
+    FeedbackRequest,
     ImpactBatchRequest,
     ImpactBatchResponse,
+    LoginRequest,
     ManualMessageCreateRequest,
     ManualMessageReviewRequest,
+    PortfolioImpactRequest,
     SentimentResponse,
     SignalResponse,
     SourcePatchRequest,
     SourcesBatchRequest,
+    TopicSubscriptionRequest,
+    UserPreferences,
 )
 from .settings import Settings
 from .store import QuantStore
@@ -37,6 +44,27 @@ def require_token(authorization: str = Header(default="", alias="Authorization")
         raise HTTPException(status_code=401, detail="Invalid or missing API token")
 
 
+def get_current_user(authorization: str = Header(default="", alias="Authorization")) -> str:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token = authorization.split(" ", 1)[1].strip()
+    username = store.username_by_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+    return username
+
+
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "service": settings.app_name,
+        "version": "0.2.0",
+        "docs": "/docs",
+        "health": "/api/v1/health",
+        "openapi": "/openapi.json",
+    }
+
+
 @app.get("/api/v1/health")
 def health() -> dict[str, Any]:
     return {
@@ -46,7 +74,16 @@ def health() -> dict[str, Any]:
         "sources": len(store.sources),
         "events": len(store.events),
         "manual_messages": len(store.manual_messages),
+        "users": len(store.users),
     }
+
+
+@app.post("/api/v1/auth/login")
+def auth_login(request: LoginRequest) -> dict[str, Any]:
+    result = store.login(username=request.username, password=request.password)
+    if not result:
+        raise HTTPException(status_code=401, detail="username or password invalid")
+    return result
 
 
 @app.get("/api/v1/sentiment/{symbol}", response_model=SentimentResponse)
@@ -136,6 +173,15 @@ def impact_batch(request: ImpactBatchRequest) -> ImpactBatchResponse:
     return ImpactBatchResponse(window=request.window, request_id=request.request_id, results=results)
 
 
+@app.post("/api/v1/portfolio/impact")
+def portfolio_impact(request: PortfolioImpactRequest, _: str = Depends(get_current_user)) -> dict[str, Any]:
+    return store.portfolio_impact(
+        portfolio_id=request.portfolio_id,
+        holdings=[item.model_dump() for item in request.holdings],
+        event_ids=request.event_ids,
+    )
+
+
 @app.get("/api/v1/sources")
 def list_sources(
     enabled: bool | None = Query(default=None),
@@ -165,6 +211,11 @@ def reload_sources(_: None = Depends(require_token)) -> dict[str, Any]:
 @app.get("/api/v1/sources/export")
 def export_sources(format: str = Query(default="yaml")) -> PlainTextResponse:
     return PlainTextResponse(store.export_sources(fmt=format))
+
+
+@app.get("/api/v1/sources/{source_id}/compliance")
+def source_compliance(source_id: str) -> dict[str, Any]:
+    return store.source_compliance(source_id)
 
 
 @app.post("/api/v1/manual/messages")
@@ -211,3 +262,101 @@ def reevaluate_manual_message(manual_message_id: str, _: None = Depends(require_
     if not record:
         raise HTTPException(status_code=404, detail="manual message not found")
     return record.model_dump(mode="json")
+
+
+@app.get("/api/v1/users/me")
+def users_me(username: str = Depends(get_current_user)) -> dict[str, Any]:
+    return store.get_user_profile(username)
+
+
+@app.put("/api/v1/users/me/preferences")
+def update_preferences(request: UserPreferences, username: str = Depends(get_current_user)) -> dict[str, Any]:
+    prefs = store.update_user_preferences(username, request.model_dump())
+    return {"username": username, "preferences": prefs}
+
+
+@app.get("/api/v1/users/me/feed")
+def user_feed(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    importance_min: float | None = Query(default=None),
+    username: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    return store.personalized_feed(username, page=page, page_size=page_size, importance_min=importance_min)
+
+
+@app.put("/api/v1/users/me/alert-subscriptions")
+def update_alert_subscriptions(
+    request: AlertSubscriptionsRequest,
+    username: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    data = store.update_user_alert_subscriptions(username, request.model_dump())
+    return {"username": username, "alert_subscriptions": data}
+
+
+@app.get("/api/v1/topics/catalog")
+def topics_catalog() -> dict[str, Any]:
+    topics = store.topic_catalog()
+    return {"total": len(topics), "topics": topics}
+
+
+@app.put("/api/v1/users/me/topic-subscriptions")
+def update_topic_subscriptions(request: TopicSubscriptionRequest, username: str = Depends(get_current_user)) -> dict[str, Any]:
+    topics = store.update_topic_subscriptions(username, request.topic_ids)
+    return {"username": username, "topic_subscriptions": topics}
+
+
+@app.get("/api/v1/users/me/topic-feed")
+def topic_feed(
+    topic: list[str] = Query(default=[]),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    username: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    return store.topic_feed(username, topic_ids=topic, page=page, page_size=page_size)
+
+
+@app.get("/api/v1/domains/catalog")
+def domain_catalog() -> dict[str, Any]:
+    domains = store.domain_catalog()
+    return {"total": len(domains), "domains": domains}
+
+
+@app.get("/api/v1/alerts/policies")
+def get_alert_policies(_: str = Depends(get_current_user)) -> dict[str, Any]:
+    return store.alert_policies
+
+
+@app.put("/api/v1/alerts/policies")
+def put_alert_policies(request: AlertPolicyUpdateRequest, _: str = Depends(get_current_user)) -> dict[str, Any]:
+    return store.update_alert_policies(request.model_dump())
+
+
+@app.post("/api/v1/alerts/{alert_id}/revoke")
+def revoke_alert(alert_id: str, reason: str = Query(default="manual_recall"), _: str = Depends(get_current_user)) -> dict[str, Any]:
+    return store.revoke_alert(alert_id=alert_id, reason=reason)
+
+
+@app.get("/api/v1/events/{event_id}/credibility")
+def event_credibility(event_id: str) -> dict[str, Any]:
+    result = store.event_credibility(event_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="event not found")
+    return result
+
+
+@app.post("/api/v1/feedback/events/{event_id}")
+def event_feedback(event_id: str, request: FeedbackRequest, username: str = Depends(get_current_user)) -> dict[str, Any]:
+    if event_id not in store.events:
+        raise HTTPException(status_code=404, detail="event not found")
+    return store.add_feedback(username=username, event_id=event_id, payload=request.model_dump())
+
+
+@app.get("/api/v1/billing/usage")
+def billing_usage(tenant_id: str = Query(...), period: str = Query(...), _: str = Depends(get_current_user)) -> dict[str, Any]:
+    return store.billing_usage(tenant_id=tenant_id, period=period)
+
+
+@app.get("/api/v1/sla/status")
+def sla_status(tenant_id: str = Query(...), _: str = Depends(get_current_user)) -> dict[str, Any]:
+    return store.sla_status(tenant_id=tenant_id)

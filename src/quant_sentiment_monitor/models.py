@@ -146,3 +146,51 @@ class EventFeedResponse(BaseModel):
     page_size: int
     total: int
     events: list[dict[str, Any]]
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class UserPreferences(BaseModel):
+    focus_domains: list[str] = Field(default_factory=list)
+    focus_keywords: list[str] = Field(default_factory=list)
+    focus_markets: list[str] = Field(default_factory=list)
+    focus_instruments: list[str] = Field(default_factory=list)
+    alert_level_min: ImportanceLevel = "P2"
+
+
+class AlertSubscriptionsRequest(BaseModel):
+    channels: list[Literal["app", "im", "email", "webhook"]] = Field(default_factory=lambda: ["app"])
+    level_min: ImportanceLevel = "P2"
+    muted: bool = False
+
+
+class TopicSubscriptionRequest(BaseModel):
+    topic_ids: list[str]
+
+
+class PortfolioHolding(BaseModel):
+    instrument: str
+    weight: float = Field(ge=-1.0, le=1.0)
+    quantity: float = 0
+
+
+class PortfolioImpactRequest(BaseModel):
+    portfolio_id: str
+    holdings: list[PortfolioHolding]
+    event_ids: list[str] = Field(default_factory=list)
+
+
+class AlertPolicyUpdateRequest(BaseModel):
+    dedup_window_minutes: int | None = None
+    cooldown_minutes: dict[str, int] | None = None
+    channels_order: list[str] | None = None
+    allow_revoke: bool | None = None
+
+
+class FeedbackRequest(BaseModel):
+    feedback_type: Literal["relevant", "not_relevant", "wrong_direction", "helpful"]
+    score: int = Field(ge=1, le=5)
+    comment: str = ""

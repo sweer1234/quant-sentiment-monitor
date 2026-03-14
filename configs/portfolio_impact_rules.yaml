@@ -1,0 +1,13 @@
+version: 1
+last_updated: "2026-03-14"
+description: "Portfolio-level impact scoring and risk delta."
+
+net_impact_score:
+  formula: "sum(weight_i * impact_i)"
+  range: [-100, 100]
+
+risk_delta:
+  metrics: [equity_beta, duration, fx_exposure, crypto_var]
+
+materiality_threshold:
+  score_abs_gte: 15

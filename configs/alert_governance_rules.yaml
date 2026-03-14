@@ -1,0 +1,19 @@
+version: 1
+last_updated: "2026-03-14"
+description: "Alert deduplication, suppression and revoke workflow."
+
+deduplication:
+  enabled: true
+  time_window_minutes: 45
+  fingerprint_fields: [title, event_type, impacted_markets]
+
+suppression:
+  cooldown_minutes:
+    P0: 5
+    P1: 10
+    P2: 30
+
+correction_and_recall:
+  enabled: true
+  allow_revoke: true
+  correction_notice_required: true

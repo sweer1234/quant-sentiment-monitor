@@ -1,0 +1,26 @@
+version: 1
+last_updated: "2026-03-14"
+description: "Quota, billing and SLA policy."
+
+tiers:
+  basic:
+    qps_limit: 10
+    monthly_event_quota: 50000
+    monthly_alert_quota: 5000
+    sla:
+      availability: 99.5
+      p95_latency_ms: 2000
+  pro:
+    qps_limit: 50
+    monthly_event_quota: 500000
+    monthly_alert_quota: 50000
+    sla:
+      availability: 99.9
+      p95_latency_ms: 1000
+  enterprise:
+    qps_limit: 200
+    monthly_event_quota: 5000000
+    monthly_alert_quota: 500000
+    sla:
+      availability: 99.95
+      p95_latency_ms: 500

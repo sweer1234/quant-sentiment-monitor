@@ -1,0 +1,14 @@
+version: 1
+last_updated: "2026-03-14"
+description: "Feedback ingestion and learning guardrails."
+
+feedback_types: [relevant, not_relevant, wrong_direction, helpful]
+
+weighting:
+  admin: 1.10
+  trader: 1.05
+  analyst: 1.00
+
+learning_pipeline:
+  online_rerank: true
+  batch_retrain: weekly
