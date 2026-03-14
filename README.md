@@ -571,7 +571,11 @@ curl -s -X POST "http://127.0.0.1:8000/api/v1/webhooks/dispatch-test" \
 # 失败投递查询与重试
 curl -s "http://127.0.0.1:8000/api/v1/webhooks/deliveries?status=failed" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
+curl -s -X POST "http://127.0.0.1:8000/api/v1/webhooks/queue/process?limit=50" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
 curl -s -X POST "http://127.0.0.1:8000/api/v1/webhooks/retry-failures?limit=20" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+curl -s "http://127.0.0.1:8000/api/v1/webhooks/stats" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
 ```
 

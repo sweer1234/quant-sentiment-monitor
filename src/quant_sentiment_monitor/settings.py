@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     feedback_learning_rules: str = "configs/feedback_learning_rules.yaml"
     billing_sla_rules: str = "configs/billing_sla_rules.yaml"
     event_calendar_rules: str = "configs/event_calendar_rules.yaml"
+    webhook_delivery_rules: str = "configs/webhook_delivery_rules.yaml"
 
     model_config = SettingsConfigDict(env_prefix="QSM_", env_file=".env", extra="ignore")
 
@@ -76,3 +77,7 @@ class Settings(BaseSettings):
     @property
     def event_calendar_rules_path(self) -> Path:
         return Path(self.event_calendar_rules)
+
+    @property
+    def webhook_delivery_rules_path(self) -> Path:
+        return Path(self.webhook_delivery_rules)

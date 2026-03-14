@@ -1,0 +1,14 @@
+version: 1
+last_updated: "2026-03-14"
+description: "Webhook delivery queue and retry backoff policy."
+
+queue:
+  worker_batch_size: 50
+  max_inflight: 5000
+
+retry:
+  base_delay_sec: 2
+  backoff_multiplier: 2.0
+  max_delay_sec: 60
+  max_retries_default: 2
+  timeout_sec_default: 5

@@ -228,24 +228,61 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     assert list_webhook.status_code == 200
     dispatch = client.post("/api/v1/webhooks/dispatch-test?force_fail=true", headers=admin_headers)
     assert dispatch.status_code == 200
-    failed_deliveries = client.get("/api/v1/webhooks/deliveries?status=failed", headers=admin_headers)
-    assert failed_deliveries.status_code == 200
-    assert failed_deliveries.json()["total"] >= 1
-    first_delivery = failed_deliveries.json()["deliveries"][0]
+    assert dispatch.json()["queued_subscriptions"] >= 1
+
+    first_process = client.post("/api/v1/webhooks/queue/process?limit=20", headers=admin_headers)
+    assert first_process.status_code == 200
+    assert first_process.json()["processed"] >= 1
+
+    retrying_deliveries = client.get("/api/v1/webhooks/deliveries?status=retrying", headers=admin_headers)
+    assert retrying_deliveries.status_code == 200
+    assert retrying_deliveries.json()["total"] >= 1
+    first_delivery = retrying_deliveries.json()["deliveries"][0]
     assert first_delivery["subscription_id"] == webhook_id
     assert first_delivery["signature"] is not None
     assert first_delivery["can_retry"] is True
+
+    second_process = client.post("/api/v1/webhooks/queue/process?limit=20", headers=admin_headers)
+    assert second_process.status_code == 200
+
+    delivered_after_process = client.get("/api/v1/webhooks/deliveries?status=delivered", headers=admin_headers)
+    assert delivered_after_process.status_code == 200
+    assert delivered_after_process.json()["total"] >= 1
+
+    stats = client.get("/api/v1/webhooks/stats", headers=admin_headers)
+    assert stats.status_code == 200
+    assert "success_rate_pct" in stats.json()
+
+    # Create a permanently failing webhook and test manual retry endpoint.
+    failing_webhook = client.post(
+        "/api/v1/webhooks/subscriptions",
+        headers=admin_headers,
+        json={
+            "name": "always-fail",
+            "url": "https://fail.example.com/hook",
+            "events": ["event.created"],
+            "enabled": True,
+            "max_retries": 1,
+        },
+    )
+    assert failing_webhook.status_code == 200
+    failing_id = failing_webhook.json()["subscription_id"]
+    client.post("/api/v1/webhooks/dispatch-test", headers=admin_headers)
+    # Process twice to make the failing webhook reach failed status.
+    client.post("/api/v1/webhooks/queue/process?limit=50", headers=admin_headers)
+    client.post("/api/v1/webhooks/queue/process?limit=50", headers=admin_headers)
+    failed_deliveries = client.get(f"/api/v1/webhooks/deliveries?subscription_id={failing_id}&status=failed", headers=admin_headers)
+    assert failed_deliveries.status_code == 200
+    assert failed_deliveries.json()["total"] >= 1
 
     retry = client.post("/api/v1/webhooks/retry-failures?limit=10", headers=admin_headers)
     assert retry.status_code == 200
     assert retry.json()["retried"] >= 1
 
-    delivered_after_retry = client.get("/api/v1/webhooks/deliveries?status=delivered", headers=admin_headers)
-    assert delivered_after_retry.status_code == 200
-    assert delivered_after_retry.json()["total"] >= 1
-
     delete_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{webhook_id}", headers=admin_headers)
     assert delete_webhook.status_code == 200
+    delete_failing_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{failing_id}", headers=admin_headers)
+    assert delete_failing_webhook.status_code == 200
 
 
 def test_auth_and_permission_denied_paths() -> None:
@@ -316,6 +353,10 @@ def test_auth_and_permission_denied_paths() -> None:
     assert denied_webhook_list.status_code == 403
     denied_webhook_retry = client.post("/api/v1/webhooks/retry-failures", headers=analyst_headers)
     assert denied_webhook_retry.status_code == 403
+    denied_webhook_process = client.post("/api/v1/webhooks/queue/process", headers=analyst_headers)
+    assert denied_webhook_process.status_code == 403
+    denied_webhook_stats = client.get("/api/v1/webhooks/stats", headers=analyst_headers)
+    assert denied_webhook_stats.status_code == 403
 
     # Missing token should fail.
     no_token = client.get("/api/v1/users/me")

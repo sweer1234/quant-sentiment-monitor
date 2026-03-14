@@ -48,6 +48,7 @@ class QuantStore:
         self.feedback_learning_rules: dict[str, Any] = {}
         self.billing_sla_rules: dict[str, Any] = {}
         self.event_calendar_rules: dict[str, Any] = {}
+        self.webhook_delivery_rules: dict[str, Any] = {}
         self.events: dict[str, Event] = {}
         self.manual_messages: dict[str, ManualMessageRecord] = {}
         self.alert_policies: dict[str, Any] = {
@@ -69,6 +70,7 @@ class QuantStore:
         self.feedback_records: list[dict[str, Any]] = []
         self.webhook_subscriptions: dict[str, dict[str, Any]] = {}
         self.webhook_deliveries: list[dict[str, Any]] = []
+        self.webhook_queue: list[dict[str, Any]] = []
         self.calendar_events: dict[str, dict[str, Any]] = {}
         self._source_by_id: dict[str, dict[str, Any]] = {}
         self.reload_configs()
@@ -90,6 +92,7 @@ class QuantStore:
             self.feedback_learning_rules = _load_yaml(self.settings.feedback_learning_rules_path)
             self.billing_sla_rules = _load_yaml(self.settings.billing_sla_rules_path)
             self.event_calendar_rules = _load_yaml(self.settings.event_calendar_rules_path)
+            self.webhook_delivery_rules = _load_yaml(self.settings.webhook_delivery_rules_path)
 
             defaults = default_data.get("sources", [])
             if not isinstance(defaults, list):
@@ -760,7 +763,51 @@ class QuantStore:
             return False, "simulated_endpoint_failure"
         return True, "ok"
 
+    def _webhook_retry_policy(self) -> dict[str, Any]:
+        retry = self.webhook_delivery_rules.get("retry", {})
+        return {
+            "base_delay_sec": int(retry.get("base_delay_sec", 2)),
+            "backoff_multiplier": float(retry.get("backoff_multiplier", 2.0)),
+            "max_delay_sec": int(retry.get("max_delay_sec", 60)),
+            "max_retries_default": int(retry.get("max_retries_default", 2)),
+            "timeout_sec_default": int(retry.get("timeout_sec_default", 5)),
+        }
+
+    def _build_webhook_payload(self, sample_event: dict[str, Any] | None) -> dict[str, Any]:
+        return {
+            "event_type": "event.created",
+            "sent_at": now_utc().isoformat(),
+            "data": sample_event or {},
+        }
+
+    def _sign_webhook_payload(self, payload: dict[str, Any], secret: str | None) -> tuple[str | None, str]:
+        payload_raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        payload_hash = hashlib.sha256(payload_raw).hexdigest()
+        if not secret:
+            return None, payload_hash
+        signature = hmac.new(secret.encode("utf-8"), payload_raw, hashlib.sha256).hexdigest()
+        return signature, payload_hash
+
+    def _simulate_webhook_send(self, url: str, *, force_fail: bool = False) -> tuple[bool, str]:
+        if force_fail:
+            return False, "forced_failure"
+        if "fail" in url.lower():
+            return False, "simulated_endpoint_failure"
+        return True, "ok"
+
+    def _calc_backoff_delay(self, retry_count: int) -> int:
+        policy = self._webhook_retry_policy()
+        delay = int(policy["base_delay_sec"] * (policy["backoff_multiplier"] ** max(retry_count - 1, 0)))
+        return min(delay, int(policy["max_delay_sec"]))
+
+    def _mask_webhook_record(self, record: dict[str, Any]) -> dict[str, Any]:
+        public_record = deepcopy(record)
+        if public_record.get("secret"):
+            public_record["secret"] = "***"
+        return public_record
+
     def create_webhook_subscription(self, username: str, payload: dict[str, Any]) -> dict[str, Any]:
+        policy = self._webhook_retry_policy()
         subscription_id = f"wh_{uuid4().hex[:10]}"
         record = {
             "subscription_id": subscription_id,
@@ -770,28 +817,22 @@ class QuantStore:
             "events": payload.get("events", ["event.created"]),
             "enabled": bool(payload.get("enabled", True)),
             "secret": payload.get("secret"),
-            "max_retries": int(payload.get("max_retries", 2)),
-            "timeout_sec": int(payload.get("timeout_sec", 5)),
+            "max_retries": int(payload.get("max_retries", policy["max_retries_default"])),
+            "timeout_sec": int(payload.get("timeout_sec", policy["timeout_sec_default"])),
             "created_at": now_utc().isoformat(),
             "last_delivery_at": None,
             "deliveries": 0,
             "failed_deliveries": 0,
         }
         self.webhook_subscriptions[subscription_id] = record
-        public_record = deepcopy(record)
-        if public_record.get("secret"):
-            public_record["secret"] = "***"
-        return public_record
+        return self._mask_webhook_record(record)
 
     def list_webhook_subscriptions(self, username: str | None = None) -> list[dict[str, Any]]:
         rows = []
         for record in self.webhook_subscriptions.values():
             if username and record.get("owner") != username:
                 continue
-            public_record = deepcopy(record)
-            if public_record.get("secret"):
-                public_record["secret"] = "***"
-            rows.append(public_record)
+            rows.append(self._mask_webhook_record(record))
         rows.sort(key=lambda item: item["created_at"], reverse=True)
         return rows
 
@@ -805,49 +846,51 @@ class QuantStore:
         return True
 
     def dispatch_webhook_test(self, event_id: str | None = None, *, force_fail: bool = False) -> dict[str, Any]:
-        delivered = 0
-        failed = 0
+        queued = 0
         sample_event = None
         if event_id and event_id in self.events:
             sample_event = self.events[event_id].model_dump(mode="json")
         elif self.events:
             sample_event = next(iter(self.events.values())).model_dump(mode="json")
         payload = self._build_webhook_payload(sample_event)
-        now = now_utc()
+        now = now_utc().isoformat()
         for subscription_id, subscription in self.webhook_subscriptions.items():
             if not subscription.get("enabled", True):
                 continue
-            ok, reason = self._simulate_webhook_send(str(subscription.get("url", "")), force_fail=force_fail)
             signature, payload_hash = self._sign_webhook_payload(payload, subscription.get("secret"))
             delivery = {
                 "delivery_id": f"wd_{uuid4().hex[:10]}",
                 "subscription_id": subscription_id,
-                "status": "delivered" if ok else "failed",
+                "status": "queued",
                 "retry_count": 0,
                 "max_retries": int(subscription.get("max_retries", 2)),
-                "can_retry": not ok and int(subscription.get("max_retries", 2)) > 0,
-                "error_reason": None if ok else reason,
+                "can_retry": int(subscription.get("max_retries", 2)) > 0,
+                "error_reason": None,
                 "signature": signature,
                 "payload_hash": payload_hash,
                 "payload": payload,
-                "created_at": now.isoformat(),
-                "delivered_at": now.isoformat() if ok else None,
-                "next_retry_at": None if ok else (now + timedelta(seconds=2)).isoformat(),
+                "created_at": now,
+                "delivered_at": None,
+                "next_retry_at": now,
             }
             self.webhook_deliveries.append(delivery)
-            if ok:
-                subscription["deliveries"] = int(subscription.get("deliveries", 0)) + 1
-                delivered += 1
-            else:
-                subscription["failed_deliveries"] = int(subscription.get("failed_deliveries", 0)) + 1
-                failed += 1
-            subscription["last_delivery_at"] = now.isoformat()
+            self.webhook_queue.append(
+                {
+                    "job_id": f"wq_{uuid4().hex[:10]}",
+                    "delivery_id": delivery["delivery_id"],
+                    "subscription_id": subscription_id,
+                    "event_id": sample_event.get("event_id") if sample_event else None,
+                    "status": "queued",
+                    "scheduled_at": now,
+                    "force_fail_once": force_fail,
+                }
+            )
+            queued += 1
         return {
             "status": "ok",
-            "delivered_subscriptions": delivered,
-            "failed_subscriptions": failed,
+            "queued_subscriptions": queued,
             "event_id": sample_event.get("event_id") if sample_event else None,
-            "dispatched_at": now.isoformat(),
+            "dispatched_at": now,
             "force_fail": force_fail,
         }
 
@@ -871,48 +914,145 @@ class QuantStore:
 
     def retry_failed_webhooks(self, *, limit: int = 20) -> dict[str, Any]:
         retried = 0
-        recovered = 0
-        still_failed = 0
+        requeued = 0
         for delivery in self.webhook_deliveries:
             if retried >= limit:
                 break
-            if delivery.get("status") != "failed" or not delivery.get("can_retry", False):
+            if delivery.get("status") != "failed":
                 continue
             subscription = self.webhook_subscriptions.get(str(delivery.get("subscription_id")))
             if not subscription or not subscription.get("enabled", True):
-                delivery["can_retry"] = False
-                continue
-            if int(delivery.get("retry_count", 0)) >= int(delivery.get("max_retries", 0)):
-                delivery["can_retry"] = False
                 continue
 
             retried += 1
-            new_retry_count = int(delivery.get("retry_count", 0)) + 1
-            ok, reason = self._simulate_webhook_send(str(subscription.get("url", "")), force_fail=False)
-            delivery["retry_count"] = new_retry_count
-            if ok:
-                delivery["status"] = "delivered"
-                delivery["can_retry"] = False
-                delivery["error_reason"] = None
-                delivery["delivered_at"] = now_utc().isoformat()
-                delivery["next_retry_at"] = None
-                recovered += 1
-                subscription["deliveries"] = int(subscription.get("deliveries", 0)) + 1
-                subscription["last_delivery_at"] = now_utc().isoformat()
-            else:
-                delivery["status"] = "failed"
-                delivery["error_reason"] = reason
-                can_retry = new_retry_count < int(delivery.get("max_retries", 0))
-                delivery["can_retry"] = can_retry
-                delivery["next_retry_at"] = (
-                    (now_utc() + timedelta(seconds=2**new_retry_count)).isoformat() if can_retry else None
-                )
-                still_failed += 1
-                subscription["failed_deliveries"] = int(subscription.get("failed_deliveries", 0)) + 1
+            delivery["retry_count"] = 0
+            delivery["can_retry"] = True
+            delivery["status"] = "retrying"
+            delivery["error_reason"] = None
+            delivery["next_retry_at"] = now_utc().isoformat()
+            self.webhook_queue.append(
+                {
+                    "job_id": f"wq_{uuid4().hex[:10]}",
+                    "delivery_id": delivery["delivery_id"],
+                    "subscription_id": delivery["subscription_id"],
+                    "event_id": delivery.get("payload", {}).get("data", {}).get("event_id"),
+                    "status": "queued",
+                    "scheduled_at": now_utc().isoformat(),
+                    "force_fail_once": False,
+                }
+            )
+            requeued += 1
 
         return {
             "status": "ok",
             "retried": retried,
-            "recovered": recovered,
-            "still_failed": still_failed,
+            "requeued": requeued,
+        }
+
+    def process_webhook_queue(self, *, limit: int = 50) -> dict[str, Any]:
+        processed = 0
+        delivered = 0
+        failed = 0
+        requeued = 0
+        now = now_utc()
+        remaining_jobs: list[dict[str, Any]] = []
+        for job in self.webhook_queue:
+            if processed >= limit:
+                remaining_jobs.append(job)
+                continue
+            scheduled_at = datetime.fromisoformat(str(job.get("scheduled_at")))
+            if scheduled_at > now:
+                remaining_jobs.append(job)
+                continue
+
+            delivery = next((item for item in self.webhook_deliveries if item.get("delivery_id") == job.get("delivery_id")), None)
+            subscription = self.webhook_subscriptions.get(str(job.get("subscription_id")))
+            if not delivery or not subscription or not subscription.get("enabled", True):
+                continue
+
+            processed += 1
+            force_fail = bool(job.get("force_fail_once", False)) and int(delivery.get("retry_count", 0)) == 0
+            ok, reason = self._simulate_webhook_send(str(subscription.get("url", "")), force_fail=force_fail)
+            if ok:
+                delivery["status"] = "delivered"
+                delivery["error_reason"] = None
+                delivery["can_retry"] = False
+                delivery["delivered_at"] = now_utc().isoformat()
+                delivery["next_retry_at"] = None
+                subscription["deliveries"] = int(subscription.get("deliveries", 0)) + 1
+                subscription["last_delivery_at"] = now_utc().isoformat()
+                delivered += 1
+                continue
+
+            # failed attempt
+            retry_count = int(delivery.get("retry_count", 0)) + 1
+            max_retries = int(delivery.get("max_retries", 0))
+            delivery["retry_count"] = retry_count
+            delivery["error_reason"] = reason
+            subscription["failed_deliveries"] = int(subscription.get("failed_deliveries", 0)) + 1
+            subscription["last_delivery_at"] = now_utc().isoformat()
+            can_retry = retry_count <= max_retries
+            delivery["can_retry"] = can_retry
+            if can_retry:
+                delay = self._calc_backoff_delay(retry_count)
+                next_retry = (now_utc() + timedelta(seconds=delay)).isoformat()
+                delivery["status"] = "retrying"
+                delivery["next_retry_at"] = next_retry
+                requeued += 1
+                remaining_jobs.append(
+                    {
+                        "job_id": f"wq_{uuid4().hex[:10]}",
+                        "delivery_id": delivery["delivery_id"],
+                        "subscription_id": delivery["subscription_id"],
+                        "event_id": job.get("event_id"),
+                        "status": "queued",
+                        "scheduled_at": next_retry,
+                        "force_fail_once": False,
+                    }
+                )
+            else:
+                delivery["status"] = "failed"
+                delivery["next_retry_at"] = None
+                failed += 1
+
+        self.webhook_queue = remaining_jobs
+        return {
+            "status": "ok",
+            "processed": processed,
+            "delivered": delivered,
+            "failed": failed,
+            "requeued": requeued,
+            "queue_size": len(self.webhook_queue),
+        }
+
+    def webhook_stats(self) -> dict[str, Any]:
+        deliveries = len(self.webhook_deliveries)
+        delivered = sum(1 for item in self.webhook_deliveries if item.get("status") == "delivered")
+        failed = sum(1 for item in self.webhook_deliveries if item.get("status") == "failed")
+        queued = sum(1 for item in self.webhook_deliveries if item.get("status") == "queued")
+        retrying = sum(1 for item in self.webhook_deliveries if item.get("status") == "retrying")
+        success_rate = round((delivered / deliveries) * 100, 2) if deliveries else 0.0
+
+        retry_counts = sorted(int(item.get("retry_count", 0)) for item in self.webhook_deliveries)
+        if retry_counts:
+            p50_index = int(round(0.50 * (len(retry_counts) - 1)))
+            p95_index = int(round(0.95 * (len(retry_counts) - 1)))
+            retry_p50 = retry_counts[p50_index]
+            retry_p95 = retry_counts[p95_index]
+        else:
+            retry_p50 = 0
+            retry_p95 = 0
+
+        return {
+            "subscriptions_total": len(self.webhook_subscriptions),
+            "deliveries_total": deliveries,
+            "delivered_total": delivered,
+            "failed_total": failed,
+            "queued_total": queued,
+            "retrying_total": retrying,
+            "queue_size": len(self.webhook_queue),
+            "success_rate_pct": success_rate,
+            "retry_count_p50": retry_p50,
+            "retry_count_p95": retry_p95,
+            "retry_policy": self._webhook_retry_policy(),
         }
