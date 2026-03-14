@@ -532,3 +532,15 @@ def test_event_ingest_and_alert_lifecycle() -> None:
     exported = client.get("/api/v1/admin/state/export", headers=admin_headers)
     assert exported.status_code == 200
     assert "events" in exported.json()
+
+    reset = client.post("/api/v1/admin/state/reset?reseed=false", headers=admin_headers)
+    assert reset.status_code == 200
+    assert reset.json()["events_total"] == 0
+
+    import_resp = client.post(
+        "/api/v1/admin/state/import?merge=false",
+        headers=admin_headers,
+        json=exported.json(),
+    )
+    assert import_resp.status_code == 200
+    assert import_resp.json()["imported_events"] >= 1

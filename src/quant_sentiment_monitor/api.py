@@ -469,6 +469,23 @@ def export_state_snapshot(_: str = Depends(require_permission("admin.state"))) -
     return store.export_state_snapshot()
 
 
+@app.post("/api/v1/admin/state/import")
+def import_state_snapshot(
+    payload: dict[str, Any],
+    merge: bool = Query(default=False),
+    _: str = Depends(require_permission("admin.state")),
+) -> dict[str, Any]:
+    return store.import_state_snapshot(payload=payload, merge=merge)
+
+
+@app.post("/api/v1/admin/state/reset")
+def reset_state(
+    reseed: bool = Query(default=True),
+    _: str = Depends(require_permission("admin.state")),
+) -> dict[str, Any]:
+    return store.reset_runtime_state(reseed=reseed)
+
+
 @app.get("/api/v1/calendar/events")
 def list_calendar_events(
     country: str | None = Query(default=None),

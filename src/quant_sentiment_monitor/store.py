@@ -1559,3 +1559,102 @@ class QuantStore:
             "webhook_dlq": self.webhook_dlq,
             "calendar_events": list(self.calendar_events.values()),
         }
+
+    def import_state_snapshot(self, payload: dict[str, Any], *, merge: bool = False) -> dict[str, Any]:
+        if not merge:
+            self.events = {}
+            self.manual_messages = {}
+            self.alerts = {}
+            self.alert_acks = []
+            self.user_preferences = {}
+            self.user_alert_subscriptions = {}
+            self.user_topic_subscriptions = {}
+            self.feedback_records = []
+            self.ingest_stats = {"total": 0, "deduplicated": 0, "accepted": 0}
+            self.webhook_subscriptions = {}
+            self.webhook_deliveries = []
+            self.webhook_queue = []
+            self.webhook_dlq = []
+            self.calendar_events = {}
+
+        imported_events = 0
+        for item in payload.get("events", []):
+            try:
+                event = Event(**item)
+                self.events[event.event_id] = event
+                imported_events += 1
+            except Exception:
+                continue
+
+        imported_manual = 0
+        for item in payload.get("manual_messages", []):
+            try:
+                record = ManualMessageRecord(**item)
+                self.manual_messages[record.manual_message_id] = record
+                imported_manual += 1
+            except Exception:
+                continue
+
+        for item in payload.get("alerts", []):
+            if "alert_id" in item:
+                self.alerts[item["alert_id"]] = item
+        self.alert_acks.extend(payload.get("alert_acks", []))
+        self.feedback_records.extend(payload.get("feedback_records", []))
+
+        for key, value in dict(payload.get("user_preferences", {})).items():
+            self.user_preferences[key] = value
+        for key, value in dict(payload.get("user_alert_subscriptions", {})).items():
+            self.user_alert_subscriptions[key] = value
+        for key, value in dict(payload.get("user_topic_subscriptions", {})).items():
+            self.user_topic_subscriptions[key] = set(value)
+
+        for item in payload.get("webhook_subscriptions", []):
+            if "subscription_id" in item:
+                self.webhook_subscriptions[item["subscription_id"]] = item
+        self.webhook_deliveries.extend(payload.get("webhook_deliveries", []))
+        self.webhook_queue.extend(payload.get("webhook_queue", []))
+        self.webhook_dlq.extend(payload.get("webhook_dlq", []))
+        for item in payload.get("calendar_events", []):
+            if "calendar_event_id" in item:
+                self.calendar_events[item["calendar_event_id"]] = item
+
+        incoming_stats = dict(payload.get("ingest_stats", {}))
+        for field in ("total", "deduplicated", "accepted"):
+            self.ingest_stats[field] = int(incoming_stats.get(field, self.ingest_stats.get(field, 0)))
+
+        self._persist_state()
+        return {
+            "status": "ok",
+            "merge": merge,
+            "imported_events": imported_events,
+            "imported_manual_messages": imported_manual,
+            "alerts_total": len(self.alerts),
+            "webhook_subscriptions_total": len(self.webhook_subscriptions),
+        }
+
+    def reset_runtime_state(self, *, reseed: bool = True) -> dict[str, Any]:
+        self.events = {}
+        self.manual_messages = {}
+        self.alerts = {}
+        self.alert_acks = []
+        self.user_preferences = {}
+        self.user_alert_subscriptions = {}
+        self.user_topic_subscriptions = {}
+        self.feedback_records = []
+        self.ingest_stats = {"total": 0, "deduplicated": 0, "accepted": 0}
+        self.webhook_subscriptions = {}
+        self.webhook_deliveries = []
+        self.webhook_queue = []
+        self.webhook_dlq = []
+        self.calendar_events = {}
+        if reseed:
+            self._seed_events()
+            self._seed_calendar_events()
+        self._persist_state()
+        return {
+            "status": "ok",
+            "reseed": reseed,
+            "events_total": len(self.events),
+            "alerts_total": len(self.alerts),
+            "calendar_events_total": len(self.calendar_events),
+        }

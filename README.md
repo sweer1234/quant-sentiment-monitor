@@ -599,6 +599,14 @@ curl -s "http://127.0.0.1:8000/api/v1/webhooks/dlq?status=pending_replay" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
 curl -s -X POST "http://127.0.0.1:8000/api/v1/webhooks/dlq/replay?limit=20" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
+
+# 状态导出/重置（管理员）
+SNAPSHOT=$(curl -s "http://127.0.0.1:8000/api/v1/admin/state/export" -H "Authorization: Bearer ${ADMIN_TOKEN}")
+curl -s -X POST "http://127.0.0.1:8000/api/v1/admin/state/reset?reseed=false" -H "Authorization: Bearer ${ADMIN_TOKEN}"
+curl -s -X POST "http://127.0.0.1:8000/api/v1/admin/state/import?merge=false" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "${SNAPSHOT}"
 ```
 
 ---
