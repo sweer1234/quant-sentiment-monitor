@@ -17,6 +17,9 @@ services:
       QSM_QUEUE_REDIS_URL: redis://redis:6379/0
       QSM_MODEL_BACKEND: http
       QSM_MODEL_SERVICE_URL: http://qsm-model:9000/infer
+      QSM_NOTIFICATION_BACKEND: mock
+      QSM_NOTIFY_EMAIL_TO: ""
+      QSM_IM_WEBHOOK_URL: ""
     volumes:
       - ./data:/app/data
       - ./configs:/app/configs

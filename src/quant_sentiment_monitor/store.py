@@ -22,6 +22,7 @@ from .engine import (
 )
 from .inference import build_inference_adapter
 from .models import Event, ImpactItem, ManualMessageCreateRequest, ManualMessageRecord
+from .notifications import build_notification_dispatcher
 from .settings import Settings
 from .state_backend import build_state_backend
 
@@ -39,6 +40,7 @@ class QuantStore:
         self.settings = settings
         self._state_backend = build_state_backend(settings)
         self._inference = build_inference_adapter(settings)
+        self._notifier = build_notification_dispatcher(settings)
         self._lock = Lock()
         self.sources: list[dict[str, Any]] = []
         self.source_weight_rules: dict[str, Any] = {}
@@ -382,7 +384,12 @@ class QuantStore:
                     "channel": channel,
                     "alert_id": alert.get("alert_id"),
                     "event_id": event.event_id,
+                    "title": event.title,
+                    "importance_level": event.importance_level,
+                    "summary": event.content[:240],
                     "status": "queued",
+                    "attempts": 0,
+                    "last_error": None,
                     "recipient_count": len(alert.get("target_users", [])),
                     "created_at": now_utc().isoformat(),
                 }
@@ -1605,18 +1612,46 @@ class QuantStore:
     def process_notifications(self, *, limit: int = 100) -> dict[str, Any]:
         processed = 0
         delivered = 0
+        failed = 0
         for item in self.notification_outbox:
             if processed >= limit:
                 break
             if item.get("status") != "queued":
                 continue
             processed += 1
-            item["status"] = "delivered"
-            item["delivered_at"] = now_utc().isoformat()
-            delivered += 1
-        self._audit("notification.process", "system", {"processed": processed, "delivered": delivered})
+            item["attempts"] = int(item.get("attempts", 0)) + 1
+            ok, reason = self._notifier.deliver(item)
+            if ok:
+                item["status"] = "delivered"
+                item["last_error"] = None
+                item["delivered_at"] = now_utc().isoformat()
+                delivered += 1
+            else:
+                item["status"] = "failed"
+                item["last_error"] = reason
+                item["failed_at"] = now_utc().isoformat()
+                failed += 1
+        self._audit(
+            "notification.process",
+            "system",
+            {"processed": processed, "delivered": delivered, "failed": failed, "backend": self.settings.notification_backend},
+        )
         self._persist_state()
-        return {"status": "ok", "processed": processed, "delivered": delivered}
+        return {"status": "ok", "processed": processed, "delivered": delivered, "failed": failed}
+
+    def retry_failed_notifications(self, *, limit: int = 100) -> dict[str, Any]:
+        requeued = 0
+        for item in self.notification_outbox:
+            if requeued >= limit:
+                break
+            if item.get("status") != "failed":
+                continue
+            item["status"] = "queued"
+            item["failed_at"] = None
+            requeued += 1
+        self._audit("notification.retry_failed", "system", {"requeued": requeued, "limit": limit})
+        self._persist_state()
+        return {"status": "ok", "requeued": requeued}
 
     def billing_usage(self, tenant_id: str, period: str) -> dict[str, Any]:
         plan = self._plan_for_user(tenant_id)
@@ -1673,6 +1708,14 @@ class QuantStore:
             "backend": self.settings.model_backend,
             "service_url": self.settings.model_service_url if self.settings.model_backend == "http" else None,
             "adapter": self._inference.__class__.__name__,
+        }
+
+    def notification_status(self) -> dict[str, Any]:
+        return {
+            "backend": self.settings.notification_backend,
+            "dispatcher": self._notifier.__class__.__name__,
+            "smtp_host": self.settings.smtp_host if self.settings.notification_backend == "real" else None,
+            "im_webhook_configured": bool(self.settings.im_webhook_url),
         }
 
     def list_calendar_events(

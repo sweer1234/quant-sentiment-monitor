@@ -737,6 +737,19 @@ def process_notifications(
     return store.process_notifications(limit=limit)
 
 
+@app.post("/api/v1/notifications/retry-failures")
+def retry_failed_notifications(
+    limit: int = Query(default=100, ge=1, le=500),
+    _: str = Depends(require_permission("alerts.write")),
+) -> dict[str, Any]:
+    return store.retry_failed_notifications(limit=limit)
+
+
+@app.get("/api/v1/notifications/status")
+def notification_status(_: str = Depends(require_permission("admin.state"))) -> dict[str, Any]:
+    return store.notification_status()
+
+
 @app.get("/api/v1/billing/usage")
 def billing_usage(tenant_id: str = Query(...), period: str = Query(...), _: str = Depends(get_current_user)) -> dict[str, Any]:
     return store.billing_usage(tenant_id=tenant_id, period=period)

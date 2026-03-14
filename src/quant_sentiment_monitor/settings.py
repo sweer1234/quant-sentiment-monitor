@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     model_backend: str = "local"
     model_service_url: str = "http://127.0.0.1:9000/infer"
     model_service_timeout_sec: int = 3
+    notification_backend: str = "mock"
+    smtp_host: str = "127.0.0.1"
+    smtp_port: int = 25
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = False
+    notify_email_from: str = "qsm-alerts@example.com"
+    notify_email_to: str = ""
+    im_webhook_url: str = ""
+    im_webhook_timeout_sec: int = 5
 
     model_config = SettingsConfigDict(env_prefix="QSM_", env_file=".env", extra="ignore")
 

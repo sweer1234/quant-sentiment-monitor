@@ -660,6 +660,12 @@ curl -s "http://127.0.0.1:8000/api/v1/audit/logs?limit=20" \
 | ALERT_WEBHOOK | 告警回调地址 | `<replace-me>` |
 | QSM_WEBHOOK_DELIVERY_RULES | Webhook 队列与退避策略 | `configs/webhook_delivery_rules.yaml` |
 | QSM_STATE_PATH | 本地状态持久化文件路径 | `data/state.json` |
+| QSM_MODEL_BACKEND | 模型推理后端（local/http） | `local` |
+| QSM_MODEL_SERVICE_URL | 外部模型推理服务地址 | `http://127.0.0.1:9000/infer` |
+| QSM_NOTIFICATION_BACKEND | 通知发送后端（mock/real） | `mock` |
+| QSM_SMTP_HOST | SMTP 服务地址（real 模式） | `smtp.example.com` |
+| QSM_NOTIFY_EMAIL_TO | 邮件接收人（逗号分隔） | `ops@example.com` |
+| QSM_IM_WEBHOOK_URL | IM 机器人 Webhook 地址 | `<replace-me>` |
 
 ---
 

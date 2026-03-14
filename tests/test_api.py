@@ -556,6 +556,11 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     process_notifications = client.post("/api/v1/notifications/process?limit=20", headers=admin_headers)
     assert process_notifications.status_code == 200
     assert process_notifications.json()["processed"] >= 0
+    notification_status = client.get("/api/v1/notifications/status", headers=admin_headers)
+    assert notification_status.status_code == 200
+    assert "backend" in notification_status.json()
+    retry_notifications = client.post("/api/v1/notifications/retry-failures?limit=20", headers=admin_headers)
+    assert retry_notifications.status_code == 200
 
     dashboard = client.get("/dashboard")
     assert dashboard.status_code == 200
@@ -690,6 +695,12 @@ def test_auth_and_permission_denied_paths() -> None:
     assert denied_metrics.status_code == 403
     denied_notifications = client.get("/api/v1/notifications/outbox", headers=analyst_headers)
     assert denied_notifications.status_code == 403
+    denied_notification_process = client.post("/api/v1/notifications/process", headers=analyst_headers)
+    assert denied_notification_process.status_code == 403
+    denied_notification_retry = client.post("/api/v1/notifications/retry-failures", headers=analyst_headers)
+    assert denied_notification_retry.status_code == 403
+    denied_notification_status = client.get("/api/v1/notifications/status", headers=analyst_headers)
+    assert denied_notification_status.status_code == 403
     denied_collector = client.post("/api/v1/collector/run-once", headers=trader_headers)
     assert denied_collector.status_code == 403
     denied_collector_enqueue = client.post("/api/v1/collector/tasks/enqueue", headers=trader_headers, json={})
