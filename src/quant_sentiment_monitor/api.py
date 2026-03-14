@@ -463,6 +463,26 @@ def delete_webhook(
 @app.post("/api/v1/webhooks/dispatch-test")
 def webhook_dispatch_test(
     event_id: str | None = Query(default=None),
+    force_fail: bool = Query(default=False),
     _: str = Depends(require_permission("webhooks.manage")),
 ) -> dict[str, Any]:
-    return store.dispatch_webhook_test(event_id=event_id)
+    return store.dispatch_webhook_test(event_id=event_id, force_fail=force_fail)
+
+
+@app.get("/api/v1/webhooks/deliveries")
+def list_webhook_deliveries(
+    subscription_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    _: str = Depends(require_permission("webhooks.manage")),
+) -> dict[str, Any]:
+    rows = store.list_webhook_deliveries(subscription_id=subscription_id, status=status, limit=limit)
+    return {"total": len(rows), "deliveries": rows}
+
+
+@app.post("/api/v1/webhooks/retry-failures")
+def retry_webhook_failures(
+    limit: int = Query(default=20, ge=1, le=200),
+    _: str = Depends(require_permission("webhooks.manage")),
+) -> dict[str, Any]:
+    return store.retry_failed_webhooks(limit=limit)

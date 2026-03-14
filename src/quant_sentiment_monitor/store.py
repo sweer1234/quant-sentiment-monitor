@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections import defaultdict
 from copy import deepcopy
 from datetime import date, datetime, timedelta
+import hashlib
+import hmac
+import json
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -65,6 +68,7 @@ class QuantStore:
         self.revoked_alerts: dict[str, dict[str, Any]] = {}
         self.feedback_records: list[dict[str, Any]] = []
         self.webhook_subscriptions: dict[str, dict[str, Any]] = {}
+        self.webhook_deliveries: list[dict[str, Any]] = []
         self.calendar_events: dict[str, dict[str, Any]] = {}
         self._source_by_id: dict[str, dict[str, Any]] = {}
         self.reload_configs()
@@ -734,6 +738,28 @@ class QuantStore:
         self.calendar_events[event_id] = current
         return deepcopy(current)
 
+    def _build_webhook_payload(self, sample_event: dict[str, Any] | None) -> dict[str, Any]:
+        return {
+            "event_type": "event.created",
+            "sent_at": now_utc().isoformat(),
+            "data": sample_event or {},
+        }
+
+    def _sign_webhook_payload(self, payload: dict[str, Any], secret: str | None) -> tuple[str | None, str]:
+        payload_raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        payload_hash = hashlib.sha256(payload_raw).hexdigest()
+        if not secret:
+            return None, payload_hash
+        signature = hmac.new(secret.encode("utf-8"), payload_raw, hashlib.sha256).hexdigest()
+        return signature, payload_hash
+
+    def _simulate_webhook_send(self, url: str, *, force_fail: bool = False) -> tuple[bool, str]:
+        if force_fail:
+            return False, "forced_failure"
+        if "fail" in url.lower():
+            return False, "simulated_endpoint_failure"
+        return True, "ok"
+
     def create_webhook_subscription(self, username: str, payload: dict[str, Any]) -> dict[str, Any]:
         subscription_id = f"wh_{uuid4().hex[:10]}"
         record = {
@@ -744,19 +770,28 @@ class QuantStore:
             "events": payload.get("events", ["event.created"]),
             "enabled": bool(payload.get("enabled", True)),
             "secret": payload.get("secret"),
+            "max_retries": int(payload.get("max_retries", 2)),
+            "timeout_sec": int(payload.get("timeout_sec", 5)),
             "created_at": now_utc().isoformat(),
             "last_delivery_at": None,
             "deliveries": 0,
+            "failed_deliveries": 0,
         }
         self.webhook_subscriptions[subscription_id] = record
-        return deepcopy(record)
+        public_record = deepcopy(record)
+        if public_record.get("secret"):
+            public_record["secret"] = "***"
+        return public_record
 
     def list_webhook_subscriptions(self, username: str | None = None) -> list[dict[str, Any]]:
         rows = []
         for record in self.webhook_subscriptions.values():
             if username and record.get("owner") != username:
                 continue
-            rows.append(deepcopy(record))
+            public_record = deepcopy(record)
+            if public_record.get("secret"):
+                public_record["secret"] = "***"
+            rows.append(public_record)
         rows.sort(key=lambda item: item["created_at"], reverse=True)
         return rows
 
@@ -769,23 +804,115 @@ class QuantStore:
         del self.webhook_subscriptions[subscription_id]
         return True
 
-    def dispatch_webhook_test(self, event_id: str | None = None) -> dict[str, Any]:
+    def dispatch_webhook_test(self, event_id: str | None = None, *, force_fail: bool = False) -> dict[str, Any]:
         delivered = 0
+        failed = 0
         sample_event = None
         if event_id and event_id in self.events:
             sample_event = self.events[event_id].model_dump(mode="json")
         elif self.events:
             sample_event = next(iter(self.events.values())).model_dump(mode="json")
-        now = now_utc().isoformat()
-        for subscription in self.webhook_subscriptions.values():
+        payload = self._build_webhook_payload(sample_event)
+        now = now_utc()
+        for subscription_id, subscription in self.webhook_subscriptions.items():
             if not subscription.get("enabled", True):
                 continue
-            subscription["deliveries"] = int(subscription.get("deliveries", 0)) + 1
-            subscription["last_delivery_at"] = now
-            delivered += 1
+            ok, reason = self._simulate_webhook_send(str(subscription.get("url", "")), force_fail=force_fail)
+            signature, payload_hash = self._sign_webhook_payload(payload, subscription.get("secret"))
+            delivery = {
+                "delivery_id": f"wd_{uuid4().hex[:10]}",
+                "subscription_id": subscription_id,
+                "status": "delivered" if ok else "failed",
+                "retry_count": 0,
+                "max_retries": int(subscription.get("max_retries", 2)),
+                "can_retry": not ok and int(subscription.get("max_retries", 2)) > 0,
+                "error_reason": None if ok else reason,
+                "signature": signature,
+                "payload_hash": payload_hash,
+                "payload": payload,
+                "created_at": now.isoformat(),
+                "delivered_at": now.isoformat() if ok else None,
+                "next_retry_at": None if ok else (now + timedelta(seconds=2)).isoformat(),
+            }
+            self.webhook_deliveries.append(delivery)
+            if ok:
+                subscription["deliveries"] = int(subscription.get("deliveries", 0)) + 1
+                delivered += 1
+            else:
+                subscription["failed_deliveries"] = int(subscription.get("failed_deliveries", 0)) + 1
+                failed += 1
+            subscription["last_delivery_at"] = now.isoformat()
         return {
             "status": "ok",
             "delivered_subscriptions": delivered,
+            "failed_subscriptions": failed,
             "event_id": sample_event.get("event_id") if sample_event else None,
-            "dispatched_at": now,
+            "dispatched_at": now.isoformat(),
+            "force_fail": force_fail,
+        }
+
+    def list_webhook_deliveries(
+        self,
+        *,
+        subscription_id: str | None = None,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        rows = []
+        for delivery in reversed(self.webhook_deliveries):
+            if subscription_id and delivery.get("subscription_id") != subscription_id:
+                continue
+            if status and str(delivery.get("status")) != status:
+                continue
+            rows.append(deepcopy(delivery))
+            if len(rows) >= limit:
+                break
+        return rows
+
+    def retry_failed_webhooks(self, *, limit: int = 20) -> dict[str, Any]:
+        retried = 0
+        recovered = 0
+        still_failed = 0
+        for delivery in self.webhook_deliveries:
+            if retried >= limit:
+                break
+            if delivery.get("status") != "failed" or not delivery.get("can_retry", False):
+                continue
+            subscription = self.webhook_subscriptions.get(str(delivery.get("subscription_id")))
+            if not subscription or not subscription.get("enabled", True):
+                delivery["can_retry"] = False
+                continue
+            if int(delivery.get("retry_count", 0)) >= int(delivery.get("max_retries", 0)):
+                delivery["can_retry"] = False
+                continue
+
+            retried += 1
+            new_retry_count = int(delivery.get("retry_count", 0)) + 1
+            ok, reason = self._simulate_webhook_send(str(subscription.get("url", "")), force_fail=False)
+            delivery["retry_count"] = new_retry_count
+            if ok:
+                delivery["status"] = "delivered"
+                delivery["can_retry"] = False
+                delivery["error_reason"] = None
+                delivery["delivered_at"] = now_utc().isoformat()
+                delivery["next_retry_at"] = None
+                recovered += 1
+                subscription["deliveries"] = int(subscription.get("deliveries", 0)) + 1
+                subscription["last_delivery_at"] = now_utc().isoformat()
+            else:
+                delivery["status"] = "failed"
+                delivery["error_reason"] = reason
+                can_retry = new_retry_count < int(delivery.get("max_retries", 0))
+                delivery["can_retry"] = can_retry
+                delivery["next_retry_at"] = (
+                    (now_utc() + timedelta(seconds=2**new_retry_count)).isoformat() if can_retry else None
+                )
+                still_failed += 1
+                subscription["failed_deliveries"] = int(subscription.get("failed_deliveries", 0)) + 1
+
+        return {
+            "status": "ok",
+            "retried": retried,
+            "recovered": recovered,
+            "still_failed": still_failed,
         }

@@ -218,14 +218,32 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
             "url": "https://example.com/webhook",
             "events": ["event.created", "alert.triggered"],
             "enabled": True,
+            "secret": "test-secret",
+            "max_retries": 2,
         },
     )
     assert created_webhook.status_code == 200
     webhook_id = created_webhook.json()["subscription_id"]
     list_webhook = client.get("/api/v1/webhooks/subscriptions", headers=admin_headers)
     assert list_webhook.status_code == 200
-    dispatch = client.post("/api/v1/webhooks/dispatch-test", headers=admin_headers)
+    dispatch = client.post("/api/v1/webhooks/dispatch-test?force_fail=true", headers=admin_headers)
     assert dispatch.status_code == 200
+    failed_deliveries = client.get("/api/v1/webhooks/deliveries?status=failed", headers=admin_headers)
+    assert failed_deliveries.status_code == 200
+    assert failed_deliveries.json()["total"] >= 1
+    first_delivery = failed_deliveries.json()["deliveries"][0]
+    assert first_delivery["subscription_id"] == webhook_id
+    assert first_delivery["signature"] is not None
+    assert first_delivery["can_retry"] is True
+
+    retry = client.post("/api/v1/webhooks/retry-failures?limit=10", headers=admin_headers)
+    assert retry.status_code == 200
+    assert retry.json()["retried"] >= 1
+
+    delivered_after_retry = client.get("/api/v1/webhooks/deliveries?status=delivered", headers=admin_headers)
+    assert delivered_after_retry.status_code == 200
+    assert delivered_after_retry.json()["total"] >= 1
+
     delete_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{webhook_id}", headers=admin_headers)
     assert delete_webhook.status_code == 200
 
@@ -292,6 +310,12 @@ def test_auth_and_permission_denied_paths() -> None:
         json={"country": "US", "event_name": "Retail Sales", "importance_level": "P1"},
     )
     assert admin_calendar.status_code == 200
+
+    # Analyst cannot access webhook delivery management.
+    denied_webhook_list = client.get("/api/v1/webhooks/deliveries", headers=analyst_headers)
+    assert denied_webhook_list.status_code == 403
+    denied_webhook_retry = client.post("/api/v1/webhooks/retry-failures", headers=analyst_headers)
+    assert denied_webhook_retry.status_code == 403
 
     # Missing token should fail.
     no_token = client.get("/api/v1/users/me")

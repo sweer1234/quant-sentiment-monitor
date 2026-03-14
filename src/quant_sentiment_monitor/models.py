@@ -202,6 +202,8 @@ class WebhookSubscriptionRequest(BaseModel):
     events: list[str] = Field(default_factory=lambda: ["event.created", "alert.triggered"])
     enabled: bool = True
     secret: str | None = None
+    max_retries: int = Field(default=2, ge=0, le=5)
+    timeout_sec: int = Field(default=5, ge=1, le=30)
 
 
 class CalendarEventsQuery(BaseModel):
