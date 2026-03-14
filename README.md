@@ -1126,6 +1126,16 @@ python scripts/run_backtest.py \
 - 支持“首次触发 + 升级触发 + 解除通知”三段式提醒。
 - 告警消息必须附带方向、置信度、影响品种与解释字段。
 
+### 11.4 观测栈启动（Prometheus + Grafana + Loki）
+
+```bash
+docker compose --profile observability up -d prometheus grafana loki promtail
+```
+
+- Prometheus: `http://127.0.0.1:9090`
+- Grafana: `http://127.0.0.1:3000`（默认 `admin/admin`）
+- Loki API: `http://127.0.0.1:3100`
+
 ---
 
 ## 12. 测试与质量保障

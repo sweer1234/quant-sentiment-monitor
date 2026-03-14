@@ -57,7 +57,64 @@ services:
     volumes:
       - qsm-redis-data:/data
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: qsm-prometheus
+    profiles: ["observability"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    container_name: qsm-grafana
+    profiles: ["observability"]
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+
+  loki:
+    image: grafana/loki:2.9.9
+    container_name: qsm-loki
+    profiles: ["observability"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+
+  promtail:
+    image: grafana/promtail:2.9.9
+    container_name: qsm-promtail
+    profiles: ["observability"]
+    volumes:
+      - ./observability/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - ./data:/workspace/data:ro
+    command: ["-config.file=/etc/promtail/config.yml"]
+    depends_on:
+      - loki
+      - qsm-api
+
 volumes:
   qsm-postgres-data:
   qsm-redis-data:
+  prometheus-data:
+  grafana-data:
+  loki-data:
 

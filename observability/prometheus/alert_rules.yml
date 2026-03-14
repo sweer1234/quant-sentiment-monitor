@@ -1,0 +1,30 @@
+groups:
+  - name: qsm-alerts
+    rules:
+      - alert: QSMApiDown
+        expr: up{job="qsm-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "QSM API unavailable"
+          description: "qsm-api has been down for more than 2 minutes."
+
+      - alert: QSMWebhookQueueBacklog
+        expr: qsm_webhook_queue_size > 200
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook queue backlog high"
+          description: "Webhook queue size has remained above 200 for 5 minutes."
+
+      - alert: QSMNotificationsQueuedHigh
+        expr: qsm_notifications_queued > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Notification outbox backlog high"
+          description: "Notification queued count has remained above 100 for 10 minutes."
+
