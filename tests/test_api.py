@@ -386,7 +386,7 @@ def test_event_ingest_and_alert_lifecycle() -> None:
     assert ingest.json()["alert"] is not None
     alert_id = ingest.json()["alert"]["alert_id"]
 
-    event_detail = client.get(f"/api/v1/events/{event_id}")
+    event_detail = client.get(f"/api/v1/events/id/{event_id}")
     assert event_detail.status_code == 200
 
     analyst_alerts = client.get("/api/v1/alerts/feed?importance_min=P2", headers=analyst_headers)

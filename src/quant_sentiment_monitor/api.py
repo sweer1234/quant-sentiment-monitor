@@ -146,7 +146,7 @@ def get_event_impact(event_id: str) -> dict[str, Any]:
     return event.model_dump(mode="json")
 
 
-@app.get("/api/v1/events/{event_id}")
+@app.get("/api/v1/events/id/{event_id}")
 def get_event_detail(event_id: str) -> dict[str, Any]:
     event = store.events.get(event_id)
     if not event:
