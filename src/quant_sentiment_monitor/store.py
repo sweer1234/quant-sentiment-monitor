@@ -69,8 +69,10 @@ class QuantStore:
         self.user_topic_subscriptions: dict[str, set[str]] = {}
         self.revoked_alerts: dict[str, dict[str, Any]] = {}
         self.alert_acks: list[dict[str, Any]] = []
+        self.alert_escalations: list[dict[str, Any]] = []
         self.feedback_records: list[dict[str, Any]] = []
         self.ingest_stats: dict[str, int] = {"total": 0, "deduplicated": 0, "accepted": 0}
+        self.audit_logs: list[dict[str, Any]] = []
         self.webhook_subscriptions: dict[str, dict[str, Any]] = {}
         self.webhook_deliveries: list[dict[str, Any]] = []
         self.webhook_queue: list[dict[str, Any]] = []
@@ -142,11 +144,13 @@ class QuantStore:
             "manual_messages": [item.model_dump(mode="json") for item in self.manual_messages.values()],
             "alerts": list(self.alerts.values()),
             "alert_acks": self.alert_acks,
+            "alert_escalations": self.alert_escalations,
             "user_preferences": self.user_preferences,
             "user_alert_subscriptions": self.user_alert_subscriptions,
             "user_topic_subscriptions": {k: sorted(v) for k, v in self.user_topic_subscriptions.items()},
             "feedback_records": self.feedback_records,
             "ingest_stats": self.ingest_stats,
+            "audit_logs": self.audit_logs,
             "webhook_subscriptions": list(self.webhook_subscriptions.values()),
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,
@@ -171,11 +175,13 @@ class QuantStore:
             self.manual_messages = {item["manual_message_id"]: ManualMessageRecord(**item) for item in payload.get("manual_messages", [])}
             self.alerts = {item["alert_id"]: item for item in payload.get("alerts", [])}
             self.alert_acks = list(payload.get("alert_acks", []))
+            self.alert_escalations = list(payload.get("alert_escalations", []))
             self.user_preferences = dict(payload.get("user_preferences", {}))
             self.user_alert_subscriptions = dict(payload.get("user_alert_subscriptions", {}))
             self.user_topic_subscriptions = {k: set(v) for k, v in dict(payload.get("user_topic_subscriptions", {})).items()}
             self.feedback_records = list(payload.get("feedback_records", []))
             self.ingest_stats = dict(payload.get("ingest_stats", {"total": 0, "deduplicated": 0, "accepted": 0}))
+            self.audit_logs = list(payload.get("audit_logs", []))
             self.webhook_subscriptions = {
                 item["subscription_id"]: item for item in payload.get("webhook_subscriptions", []) if "subscription_id" in item
             }
@@ -362,6 +368,7 @@ class QuantStore:
         duplicate = self._find_duplicate_event(source_id=source_id, title=title, content=content, published_at=published_at)
         if duplicate:
             self.ingest_stats["deduplicated"] = int(self.ingest_stats.get("deduplicated", 0)) + 1
+            self._audit("event.ingest_deduplicated", "system", {"event_id": duplicate.event_id, "source_id": source_id})
             self._persist_state()
             return {
                 "event": duplicate.model_dump(mode="json"),
@@ -389,6 +396,7 @@ class QuantStore:
         self.events[event.event_id] = event
         alert = self._create_alert_for_event(event)
         self.ingest_stats["accepted"] = int(self.ingest_stats.get("accepted", 0)) + 1
+        self._audit("event.ingest", "system", {"event_id": event.event_id, "source_id": source_id, "alert_created": bool(alert)})
         self._persist_state()
         return {
             "event": event.model_dump(mode="json"),
@@ -699,6 +707,7 @@ class QuantStore:
             }
         if username not in self.user_alert_subscriptions:
             self.user_alert_subscriptions[username] = {"channels": ["app"], "level_min": "P2", "muted": False}
+        self._audit("auth.login", username, {"role": user.get("role", "analyst")})
         return {
             "access_token": access_token,
             "token_type": "bearer",
@@ -720,17 +729,48 @@ class QuantStore:
                 "alerts.write",
                 "alerts.revoke",
                 "alerts.ack",
+                "alerts.escalate",
                 "manual.review",
                 "webhooks.manage",
                 "calendar.manage",
+                "calendar.backfill",
                 "feedback.write",
                 "events.ingest",
                 "admin.state",
+                "audit.read",
             },
             "trader": {"alerts.revoke", "alerts.ack", "feedback.write", "webhooks.manage", "events.ingest"},
             "analyst": {"alerts.ack", "feedback.write", "events.ingest"},
         }
         return action in permissions.get(role, set())
+
+    def _audit(self, action: str, actor: str, detail: dict[str, Any] | None = None) -> None:
+        record = {
+            "audit_id": f"audit_{uuid4().hex[:10]}",
+            "action": action,
+            "actor": actor,
+            "detail": detail or {},
+            "created_at": now_utc().isoformat(),
+        }
+        self.audit_logs.append(record)
+
+    def list_audit_logs(
+        self,
+        *,
+        action: str | None = None,
+        actor: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        rows = []
+        for item in reversed(self.audit_logs):
+            if action and str(item.get("action")) != action:
+                continue
+            if actor and str(item.get("actor")) != actor:
+                continue
+            rows.append(deepcopy(item))
+            if len(rows) >= limit:
+                break
+        return rows
 
     def get_user_profile(self, username: str) -> dict[str, Any]:
         user = self.users.get(username, {"role": "analyst"})
@@ -902,6 +942,7 @@ class QuantStore:
         for key, value in payload.items():
             if value is not None:
                 self.alert_policies[key] = value
+        self._audit("alert.policy.update", "system", {"fields": [k for k, v in payload.items() if v is not None]})
         self._persist_state()
         return deepcopy(self.alert_policies)
 
@@ -945,6 +986,7 @@ class QuantStore:
                 "acked_at": alert["acked_at"],
             }
         )
+        self._audit("alert.ack", username, {"alert_id": alert_id, "note": note})
         self._persist_state()
         return deepcopy(alert)
 
@@ -961,8 +1003,65 @@ class QuantStore:
             self.alerts[alert_id]["status"] = "revoked"
             self.alerts[alert_id]["updated_at"] = revoked["revoked_at"]
             self.alerts[alert_id]["revoke_reason"] = reason
+        self._audit("alert.revoke", "system", {"alert_id": alert_id, "reason": reason})
         self._persist_state()
         return revoked
+
+    def _alert_escalation_minutes(self, level: str) -> int:
+        esc = self.alert_governance_rules.get("escalation", {})
+        defaults = {"P0": 3, "P1": 10, "P2": 30}
+        if isinstance(esc.get("p0_unacked_escalate_minutes"), (int, float)):
+            defaults["P0"] = int(esc["p0_unacked_escalate_minutes"])
+        if isinstance(esc.get("p1_unacked_escalate_minutes"), (int, float)):
+            defaults["P1"] = int(esc["p1_unacked_escalate_minutes"])
+        if isinstance(esc.get("p2_unacked_escalate_minutes"), (int, float)):
+            defaults["P2"] = int(esc["p2_unacked_escalate_minutes"])
+        return defaults.get(level, 10)
+
+    def escalate_alerts(self, *, actor: str, limit: int = 100, force: bool = False) -> dict[str, Any]:
+        escalated = 0
+        skipped = 0
+        now = now_utc()
+        for alert in sorted(self.alerts.values(), key=lambda item: item.get("created_at", "")):
+            if escalated >= limit:
+                break
+            if alert.get("status") not in {"active"}:
+                skipped += 1
+                continue
+            if alert.get("acked_at") is not None:
+                skipped += 1
+                continue
+            created_at = datetime.fromisoformat(str(alert.get("created_at")))
+            age_minutes = (now - created_at).total_seconds() / 60
+            threshold = self._alert_escalation_minutes(str(alert.get("importance_level", "P2")))
+            if not force and age_minutes < threshold:
+                skipped += 1
+                continue
+            alert["status"] = "escalated"
+            alert["escalated_at"] = now.isoformat()
+            alert["updated_at"] = now.isoformat()
+            alert["escalation_count"] = int(alert.get("escalation_count", 0)) + 1
+            alert["escalation_channels"] = self.alert_policies.get("channels_order", ["app", "im", "email", "phone"])
+            escalation = {
+                "escalation_id": f"esc_{uuid4().hex[:10]}",
+                "alert_id": alert["alert_id"],
+                "event_id": alert.get("event_id"),
+                "importance_level": alert.get("importance_level"),
+                "age_minutes": round(age_minutes, 2),
+                "threshold_minutes": threshold,
+                "channels": alert["escalation_channels"],
+                "actor": actor,
+                "created_at": now.isoformat(),
+            }
+            self.alert_escalations.append(escalation)
+            escalated += 1
+
+        self._audit("alert.escalate", actor, {"escalated": escalated, "skipped": skipped, "force": force, "limit": limit})
+        self._persist_state()
+        return {"status": "ok", "escalated": escalated, "skipped": skipped}
+
+    def list_alert_escalations(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        return [deepcopy(item) for item in sorted(self.alert_escalations, key=lambda x: x.get("created_at", ""), reverse=True)[:limit]]
 
     def add_feedback(self, username: str, event_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         record = {
@@ -1058,8 +1157,68 @@ class QuantStore:
         current.setdefault("importance_level", "P1")
         current.setdefault("event_time", now_utc().isoformat())
         self.calendar_events[event_id] = current
+        self._audit("calendar.upsert", "system", {"calendar_event_id": event_id})
         self._persist_state()
         return deepcopy(current)
+
+    def backfill_calendar_actual(
+        self,
+        *,
+        calendar_event_id: str,
+        actual: float,
+        consensus: float | None,
+        note: str,
+        actor: str,
+    ) -> dict[str, Any] | None:
+        item = self.calendar_events.get(calendar_event_id)
+        if not item:
+            return None
+        item["actual"] = float(actual)
+        if consensus is not None:
+            item["consensus"] = float(consensus)
+        item["actual_note"] = note
+        item["actual_updated_at"] = now_utc().isoformat()
+
+        surprise = self.calendar_surprise(calendar_event_id)
+        generated_event_id = None
+        if surprise and surprise.get("status") == "available":
+            abs_surprise = abs(float(surprise.get("surprise_ratio", 0)))
+            threshold = float(self.event_calendar_rules.get("importance_boost", {}).get("high_surprise_abs_gte", 0.2))
+            if abs_surprise >= threshold:
+                event = self._build_event(
+                    source_id=str(item.get("source", "calendar")),
+                    title=f"{item.get('event_name', 'Calendar Event')} actual released",
+                    content=(
+                        f"consensus={item.get('consensus')} actual={item.get('actual')} "
+                        f"surprise={surprise.get('surprise_ratio')}"
+                    ),
+                    related_instruments=[],
+                )
+                boost = float(self.event_calendar_rules.get("importance_boost", {}).get("boost_points", 8))
+                event.importance_score = min(100.0, round(event.importance_score + boost, 2))
+                event.importance_level = level_from_score(event.importance_score)  # type: ignore[assignment]
+                event.event_type = "calendar_release_surprise"
+                event.evidence = [f"calendar_event_id:{calendar_event_id}"]
+                self.events[event.event_id] = event
+                self._create_alert_for_event(event)
+                generated_event_id = event.event_id
+
+        self._audit(
+            "calendar.backfill_actual",
+            actor,
+            {
+                "calendar_event_id": calendar_event_id,
+                "actual": actual,
+                "consensus": item.get("consensus"),
+                "generated_event_id": generated_event_id,
+            },
+        )
+        self._persist_state()
+        return {
+            "calendar_event": deepcopy(item),
+            "surprise": surprise,
+            "generated_event_id": generated_event_id,
+        }
 
     def _webhook_retry_policy(self) -> dict[str, Any]:
         retry = self.webhook_delivery_rules.get("retry", {})
@@ -1148,6 +1307,7 @@ class QuantStore:
             "_rl_count": 0,
         }
         self.webhook_subscriptions[subscription_id] = record
+        self._audit("webhook.subscription.create", username, {"subscription_id": subscription_id, "url": record.get("url")})
         self._persist_state()
         return self._mask_webhook_record(record)
 
@@ -1167,6 +1327,7 @@ class QuantStore:
         if record.get("owner") != username and self.user_role(username) != "admin":
             return False
         del self.webhook_subscriptions[subscription_id]
+        self._audit("webhook.subscription.delete", username, {"subscription_id": subscription_id})
         self._persist_state()
         return True
 
@@ -1211,6 +1372,7 @@ class QuantStore:
                 }
             )
             queued += 1
+        self._audit("webhook.dispatch_test", "system", {"queued_subscriptions": queued, "force_fail": force_fail})
         self._persist_state()
         return {
             "status": "ok",
@@ -1268,6 +1430,7 @@ class QuantStore:
                 }
             )
             requeued += 1
+        self._audit("webhook.retry_failed", "system", {"retried": retried, "requeued": requeued})
         self._persist_state()
         return {
             "status": "ok",
@@ -1316,6 +1479,7 @@ class QuantStore:
                 }
             )
             replayed += 1
+        self._audit("webhook.dlq.replay", "system", {"replayed": replayed, "limit": limit})
         self._persist_state()
         return {"status": "ok", "replayed": replayed, "queue_size": len(self.webhook_queue)}
 
@@ -1423,6 +1587,11 @@ class QuantStore:
                 failed += 1
 
         self.webhook_queue = remaining_jobs
+        self._audit(
+            "webhook.queue.process",
+            "system",
+            {"processed": processed, "delivered": delivered, "failed": failed, "requeued": requeued, "throttled": throttled, "dlq_moved": dlq_moved},
+        )
         self._persist_state()
         return {
             "status": "ok",
@@ -1538,6 +1707,7 @@ class QuantStore:
             "alerts_acked": acked_alerts,
             "users_total": len(self.users),
             "feedback_total": len(self.feedback_records),
+            "audit_total": len(self.audit_logs),
             "ingest_stats": self.ingest_stats,
             "webhook": webhook,
         }
@@ -1622,6 +1792,11 @@ class QuantStore:
         for field in ("total", "deduplicated", "accepted"):
             self.ingest_stats[field] = int(incoming_stats.get(field, self.ingest_stats.get(field, 0)))
 
+        self._audit(
+            "admin.state.import",
+            "system",
+            {"merge": merge, "imported_events": imported_events, "imported_manual_messages": imported_manual},
+        )
         self._persist_state()
         return {
             "status": "ok",
@@ -1650,6 +1825,7 @@ class QuantStore:
         if reseed:
             self._seed_events()
             self._seed_calendar_events()
+        self._audit("admin.state.reset", "system", {"reseed": reseed})
         self._persist_state()
         return {
             "status": "ok",

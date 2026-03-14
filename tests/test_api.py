@@ -178,6 +178,12 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     assert update.status_code == 200
     assert update.json()["dedup_window_minutes"] == 30
 
+    escalated = client.post("/api/v1/alerts/escalate?force=true&limit=50", headers=admin_headers)
+    assert escalated.status_code == 200
+    escalations = client.get("/api/v1/alerts/escalations?limit=20", headers=admin_headers)
+    assert escalations.status_code == 200
+    assert escalations.json()["total"] >= 1
+
     revoke = client.post("/api/v1/alerts/alert_test_001/revoke?reason=test", headers=admin_headers)
     assert revoke.status_code == 200
     assert revoke.json()["status"] == "revoked"
@@ -203,6 +209,13 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     calendar_id = calendar.json()["events"][0]["calendar_event_id"]
     surprise = client.get(f"/api/v1/calendar/events/{calendar_id}/surprise")
     assert surprise.status_code == 200
+    backfill_actual = client.post(
+        f"/api/v1/calendar/events/{calendar_id}/actual",
+        headers=admin_headers,
+        json={"actual": 4.1, "consensus": 3.8, "note": "release update"},
+    )
+    assert backfill_actual.status_code == 200
+    assert backfill_actual.json()["surprise"]["status"] == "available"
 
     upsert_calendar = client.post(
         "/api/v1/calendar/events",
@@ -384,6 +397,12 @@ def test_auth_and_permission_denied_paths() -> None:
         json={"country": "US", "event_name": "ISM PMI", "importance_level": "P1"},
     )
     assert trader_calendar.status_code == 403
+    trader_backfill = client.post(
+        "/api/v1/calendar/events/cal_us_nfp_last/actual",
+        headers=trader_headers,
+        json={"actual": 200, "consensus": 180},
+    )
+    assert trader_backfill.status_code == 403
 
     # Admin can create calendar event.
     admin_calendar = client.post(
@@ -406,6 +425,12 @@ def test_auth_and_permission_denied_paths() -> None:
     assert denied_webhook_dlq.status_code == 403
     denied_webhook_replay = client.post("/api/v1/webhooks/dlq/replay", headers=analyst_headers)
     assert denied_webhook_replay.status_code == 403
+    denied_alert_escalate = client.post("/api/v1/alerts/escalate", headers=analyst_headers)
+    assert denied_alert_escalate.status_code == 403
+    denied_alert_escalations = client.get("/api/v1/alerts/escalations", headers=analyst_headers)
+    assert denied_alert_escalations.status_code == 403
+    denied_audit = client.get("/api/v1/audit/logs", headers=analyst_headers)
+    assert denied_audit.status_code == 403
     denied_metrics = client.get("/api/v1/metrics/summary", headers=analyst_headers)
     assert denied_metrics.status_code == 403
 
@@ -528,6 +553,11 @@ def test_event_ingest_and_alert_lifecycle() -> None:
     assert "events_total" in metrics.json()
     assert "ingest_stats" in metrics.json()
     assert metrics.json()["ingest_stats"]["total"] >= 1
+    assert "audit_total" in metrics.json()
+
+    audits = client.get("/api/v1/audit/logs?limit=20", headers=admin_headers)
+    assert audits.status_code == 200
+    assert audits.json()["total"] >= 1
 
     exported = client.get("/api/v1/admin/state/export", headers=admin_headers)
     assert exported.status_code == 200

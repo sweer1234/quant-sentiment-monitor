@@ -12,6 +12,7 @@ from .models import (
     AlertAckRequest,
     EventBatchIngestRequest,
     EventIngestRequest,
+    CalendarActualUpdateRequest,
     EventFeedResponse,
     FeedbackRequest,
     ImpactBatchRequest,
@@ -430,6 +431,24 @@ def revoke_alert(
     return store.revoke_alert(alert_id=alert_id, reason=reason)
 
 
+@app.post("/api/v1/alerts/escalate")
+def escalate_alerts(
+    limit: int = Query(default=100, ge=1, le=500),
+    force: bool = Query(default=False),
+    actor: str = Depends(require_permission("alerts.escalate")),
+) -> dict[str, Any]:
+    return store.escalate_alerts(actor=actor, limit=limit, force=force)
+
+
+@app.get("/api/v1/alerts/escalations")
+def alert_escalations(
+    limit: int = Query(default=100, ge=1, le=500),
+    _: str = Depends(require_permission("alerts.escalate")),
+) -> dict[str, Any]:
+    rows = store.list_alert_escalations(limit=limit)
+    return {"total": len(rows), "escalations": rows}
+
+
 @app.get("/api/v1/events/{event_id}/credibility")
 def event_credibility(event_id: str) -> dict[str, Any]:
     result = store.event_credibility(event_id)
@@ -486,6 +505,17 @@ def reset_state(
     return store.reset_runtime_state(reseed=reseed)
 
 
+@app.get("/api/v1/audit/logs")
+def audit_logs(
+    action: str | None = Query(default=None),
+    actor: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+    _: str = Depends(require_permission("audit.read")),
+) -> dict[str, Any]:
+    rows = store.list_audit_logs(action=action, actor=actor, limit=limit)
+    return {"total": len(rows), "logs": rows}
+
+
 @app.get("/api/v1/calendar/events")
 def list_calendar_events(
     country: str | None = Query(default=None),
@@ -516,6 +546,24 @@ def upsert_calendar_event(
     _: str = Depends(require_permission("calendar.manage")),
 ) -> dict[str, Any]:
     return store.upsert_calendar_event(payload)
+
+
+@app.post("/api/v1/calendar/events/{calendar_event_id}/actual")
+def backfill_calendar_actual(
+    calendar_event_id: str,
+    request: CalendarActualUpdateRequest,
+    actor: str = Depends(require_permission("calendar.backfill")),
+) -> dict[str, Any]:
+    result = store.backfill_calendar_actual(
+        calendar_event_id=calendar_event_id,
+        actual=request.actual,
+        consensus=request.consensus,
+        note=request.note,
+        actor=actor,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="calendar event not found")
+    return result
 
 
 @app.get("/api/v1/webhooks/subscriptions")

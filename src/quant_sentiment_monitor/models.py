@@ -234,3 +234,9 @@ class EventBatchIngestRequest(BaseModel):
 
 class AlertAckRequest(BaseModel):
     note: str = ""
+
+
+class CalendarActualUpdateRequest(BaseModel):
+    actual: float
+    consensus: float | None = None
+    note: str = ""

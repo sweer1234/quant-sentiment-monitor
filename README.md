@@ -607,6 +607,16 @@ curl -s -X POST "http://127.0.0.1:8000/api/v1/admin/state/import?merge=false" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   -H "Content-Type: application/json" \
   -d "${SNAPSHOT}"
+
+# 告警升级、日历实际值回填、审计日志
+curl -s -X POST "http://127.0.0.1:8000/api/v1/alerts/escalate?force=true&limit=50" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+curl -s -X POST "http://127.0.0.1:8000/api/v1/calendar/events/cal_us_nfp_last/actual" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"actual":235,"consensus":180,"note":"official release"}'
+curl -s "http://127.0.0.1:8000/api/v1/audit/logs?limit=20" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
 ```
 
 ---
