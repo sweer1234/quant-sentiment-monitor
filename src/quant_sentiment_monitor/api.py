@@ -554,3 +554,30 @@ def process_webhook_queue(
 @app.get("/api/v1/webhooks/stats")
 def webhook_stats(_: str = Depends(require_permission("webhooks.manage"))) -> dict[str, Any]:
     return store.webhook_stats()
+
+
+@app.get("/api/v1/webhooks/stats/subscriptions")
+def webhook_subscription_stats(
+    top_n: int = Query(default=10, ge=1, le=100),
+    _: str = Depends(require_permission("webhooks.manage")),
+) -> dict[str, Any]:
+    rows = store.webhook_subscription_stats(top_n=top_n)
+    return {"total": len(rows), "subscriptions": rows}
+
+
+@app.get("/api/v1/webhooks/dlq")
+def webhook_dlq(
+    status: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    _: str = Depends(require_permission("webhooks.manage")),
+) -> dict[str, Any]:
+    rows = store.list_webhook_dlq(status=status, limit=limit)
+    return {"total": len(rows), "items": rows}
+
+
+@app.post("/api/v1/webhooks/dlq/replay")
+def replay_webhook_dlq(
+    limit: int = Query(default=20, ge=1, le=200),
+    _: str = Depends(require_permission("webhooks.manage")),
+) -> dict[str, Any]:
+    return store.replay_webhook_dlq(limit=limit)

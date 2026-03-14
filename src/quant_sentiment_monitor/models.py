@@ -204,6 +204,7 @@ class WebhookSubscriptionRequest(BaseModel):
     secret: str | None = None
     max_retries: int = Field(default=2, ge=0, le=5)
     timeout_sec: int = Field(default=5, ge=1, le=30)
+    rate_limit_per_minute: int = Field(default=30, ge=1, le=5000)
 
 
 class CalendarEventsQuery(BaseModel):

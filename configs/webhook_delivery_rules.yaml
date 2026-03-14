@@ -12,3 +12,10 @@ retry:
   max_delay_sec: 60
   max_retries_default: 2
   timeout_sec_default: 5
+
+rate_limit:
+  per_subscription_per_minute_default: 30
+
+dlq:
+  enabled: true
+  replay_limit_default: 20

@@ -73,6 +73,7 @@ class QuantStore:
         self.webhook_subscriptions: dict[str, dict[str, Any]] = {}
         self.webhook_deliveries: list[dict[str, Any]] = []
         self.webhook_queue: list[dict[str, Any]] = []
+        self.webhook_dlq: list[dict[str, Any]] = []
         self.calendar_events: dict[str, dict[str, Any]] = {}
         self._source_by_id: dict[str, dict[str, Any]] = {}
         self.reload_configs()
@@ -147,6 +148,7 @@ class QuantStore:
             "webhook_subscriptions": list(self.webhook_subscriptions.values()),
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,
+            "webhook_dlq": self.webhook_dlq,
             "calendar_events": list(self.calendar_events.values()),
         }
         with state_file.open("w", encoding="utf-8") as f:
@@ -176,6 +178,7 @@ class QuantStore:
             }
             self.webhook_deliveries = list(payload.get("webhook_deliveries", []))
             self.webhook_queue = list(payload.get("webhook_queue", []))
+            self.webhook_dlq = list(payload.get("webhook_dlq", []))
             self.calendar_events = {
                 item["calendar_event_id"]: item for item in payload.get("calendar_events", []) if "calendar_event_id" in item
             }
@@ -990,28 +993,6 @@ class QuantStore:
         self._persist_state()
         return deepcopy(current)
 
-    def _build_webhook_payload(self, sample_event: dict[str, Any] | None) -> dict[str, Any]:
-        return {
-            "event_type": "event.created",
-            "sent_at": now_utc().isoformat(),
-            "data": sample_event or {},
-        }
-
-    def _sign_webhook_payload(self, payload: dict[str, Any], secret: str | None) -> tuple[str | None, str]:
-        payload_raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-        payload_hash = hashlib.sha256(payload_raw).hexdigest()
-        if not secret:
-            return None, payload_hash
-        signature = hmac.new(secret.encode("utf-8"), payload_raw, hashlib.sha256).hexdigest()
-        return signature, payload_hash
-
-    def _simulate_webhook_send(self, url: str, *, force_fail: bool = False) -> tuple[bool, str]:
-        if force_fail:
-            return False, "forced_failure"
-        if "fail" in url.lower():
-            return False, "simulated_endpoint_failure"
-        return True, "ok"
-
     def _webhook_retry_policy(self) -> dict[str, Any]:
         retry = self.webhook_delivery_rules.get("retry", {})
         return {
@@ -1021,6 +1002,14 @@ class QuantStore:
             "max_retries_default": int(retry.get("max_retries_default", 2)),
             "timeout_sec_default": int(retry.get("timeout_sec_default", 5)),
         }
+
+    def _webhook_rate_limit_default(self) -> int:
+        rate_limit = self.webhook_delivery_rules.get("rate_limit", {})
+        return int(rate_limit.get("per_subscription_per_minute_default", 30))
+
+    def _webhook_dlq_enabled(self) -> bool:
+        dlq = self.webhook_delivery_rules.get("dlq", {})
+        return bool(dlq.get("enabled", True))
 
     def _build_webhook_payload(self, sample_event: dict[str, Any] | None) -> dict[str, Any]:
         return {
@@ -1049,10 +1038,23 @@ class QuantStore:
         delay = int(policy["base_delay_sec"] * (policy["backoff_multiplier"] ** max(retry_count - 1, 0)))
         return min(delay, int(policy["max_delay_sec"]))
 
+    def _consume_subscription_rate_limit(self, subscription: dict[str, Any]) -> bool:
+        limit = int(subscription.get("rate_limit_per_minute", self._webhook_rate_limit_default()))
+        now_bucket = now_utc().strftime("%Y-%m-%dT%H:%M")
+        if subscription.get("_rl_bucket") != now_bucket:
+            subscription["_rl_bucket"] = now_bucket
+            subscription["_rl_count"] = 0
+        if int(subscription.get("_rl_count", 0)) >= limit:
+            return False
+        subscription["_rl_count"] = int(subscription.get("_rl_count", 0)) + 1
+        return True
+
     def _mask_webhook_record(self, record: dict[str, Any]) -> dict[str, Any]:
         public_record = deepcopy(record)
         if public_record.get("secret"):
             public_record["secret"] = "***"
+        public_record.pop("_rl_bucket", None)
+        public_record.pop("_rl_count", None)
         return public_record
 
     def create_webhook_subscription(self, username: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1068,10 +1070,14 @@ class QuantStore:
             "secret": payload.get("secret"),
             "max_retries": int(payload.get("max_retries", policy["max_retries_default"])),
             "timeout_sec": int(payload.get("timeout_sec", policy["timeout_sec_default"])),
+            "rate_limit_per_minute": int(payload.get("rate_limit_per_minute", self._webhook_rate_limit_default())),
             "created_at": now_utc().isoformat(),
             "last_delivery_at": None,
             "deliveries": 0,
             "failed_deliveries": 0,
+            "throttled_count": 0,
+            "_rl_bucket": None,
+            "_rl_count": 0,
         }
         self.webhook_subscriptions[subscription_id] = record
         self._persist_state()
@@ -1201,11 +1207,57 @@ class QuantStore:
             "requeued": requeued,
         }
 
+    def list_webhook_dlq(self, *, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        rows = []
+        for item in reversed(self.webhook_dlq):
+            if status and str(item.get("status")) != status:
+                continue
+            rows.append(deepcopy(item))
+            if len(rows) >= limit:
+                break
+        return rows
+
+    def replay_webhook_dlq(self, *, limit: int = 20) -> dict[str, Any]:
+        replayed = 0
+        for item in self.webhook_dlq:
+            if replayed >= limit:
+                break
+            if item.get("status") != "pending_replay":
+                continue
+            delivery = next((d for d in self.webhook_deliveries if d.get("delivery_id") == item.get("delivery_id")), None)
+            if not delivery:
+                item["status"] = "discarded"
+                continue
+            subscription = self.webhook_subscriptions.get(str(item.get("subscription_id")))
+            if not subscription or not subscription.get("enabled", True):
+                continue
+            item["status"] = "replayed"
+            item["replayed_at"] = now_utc().isoformat()
+            delivery["status"] = "retrying"
+            delivery["can_retry"] = True
+            delivery["next_retry_at"] = now_utc().isoformat()
+            self.webhook_queue.append(
+                {
+                    "job_id": f"wq_{uuid4().hex[:10]}",
+                    "delivery_id": delivery["delivery_id"],
+                    "subscription_id": delivery["subscription_id"],
+                    "event_id": item.get("event_id"),
+                    "status": "queued",
+                    "scheduled_at": now_utc().isoformat(),
+                    "force_fail_once": False,
+                }
+            )
+            replayed += 1
+        self._persist_state()
+        return {"status": "ok", "replayed": replayed, "queue_size": len(self.webhook_queue)}
+
     def process_webhook_queue(self, *, limit: int = 50, ignore_schedule: bool = False) -> dict[str, Any]:
         processed = 0
         delivered = 0
         failed = 0
         requeued = 0
+        throttled = 0
+        dlq_moved = 0
         now = now_utc()
         remaining_jobs: list[dict[str, Any]] = []
         for job in self.webhook_queue:
@@ -1223,6 +1275,25 @@ class QuantStore:
                 continue
 
             processed += 1
+            # Per-subscription soft rate limit.
+            if not self._consume_subscription_rate_limit(subscription):
+                throttled += 1
+                subscription["throttled_count"] = int(subscription.get("throttled_count", 0)) + 1
+                delivery["status"] = "throttled"
+                delivery["next_retry_at"] = (now_utc() + timedelta(seconds=1)).isoformat()
+                remaining_jobs.append(
+                    {
+                        "job_id": f"wq_{uuid4().hex[:10]}",
+                        "delivery_id": delivery["delivery_id"],
+                        "subscription_id": delivery["subscription_id"],
+                        "event_id": job.get("event_id"),
+                        "status": "queued",
+                        "scheduled_at": delivery["next_retry_at"],
+                        "force_fail_once": False,
+                    }
+                )
+                continue
+
             force_fail = bool(job.get("force_fail_once", False)) and int(delivery.get("retry_count", 0)) == 0
             ok, reason = self._simulate_webhook_send(str(subscription.get("url", "")), force_fail=force_fail)
             if ok:
@@ -1263,7 +1334,23 @@ class QuantStore:
                     }
                 )
             else:
-                delivery["status"] = "failed"
+                if self._webhook_dlq_enabled():
+                    delivery["status"] = "dlq"
+                    dlq_record = {
+                        "dlq_id": f"dlq_{uuid4().hex[:10]}",
+                        "delivery_id": delivery["delivery_id"],
+                        "subscription_id": delivery["subscription_id"],
+                        "event_id": job.get("event_id"),
+                        "reason": reason,
+                        "retry_count": retry_count,
+                        "max_retries": max_retries,
+                        "moved_at": now_utc().isoformat(),
+                        "status": "pending_replay",
+                    }
+                    self.webhook_dlq.append(dlq_record)
+                    dlq_moved += 1
+                else:
+                    delivery["status"] = "failed"
                 delivery["next_retry_at"] = None
                 failed += 1
 
@@ -1275,6 +1362,8 @@ class QuantStore:
             "delivered": delivered,
             "failed": failed,
             "requeued": requeued,
+            "throttled": throttled,
+            "dlq_moved": dlq_moved,
             "queue_size": len(self.webhook_queue),
         }
 
@@ -1284,6 +1373,8 @@ class QuantStore:
         failed = sum(1 for item in self.webhook_deliveries if item.get("status") == "failed")
         queued = sum(1 for item in self.webhook_deliveries if item.get("status") == "queued")
         retrying = sum(1 for item in self.webhook_deliveries if item.get("status") == "retrying")
+        throttled = sum(1 for item in self.webhook_deliveries if item.get("status") == "throttled")
+        dlq = sum(1 for item in self.webhook_deliveries if item.get("status") == "dlq")
         success_rate = round((delivered / deliveries) * 100, 2) if deliveries else 0.0
 
         retry_counts = sorted(int(item.get("retry_count", 0)) for item in self.webhook_deliveries)
@@ -1303,12 +1394,61 @@ class QuantStore:
             "failed_total": failed,
             "queued_total": queued,
             "retrying_total": retrying,
+            "throttled_total": throttled,
+            "dlq_total": dlq,
             "queue_size": len(self.webhook_queue),
+            "dlq_size": len(self.webhook_dlq),
             "success_rate_pct": success_rate,
             "retry_count_p50": retry_p50,
             "retry_count_p95": retry_p95,
             "retry_policy": self._webhook_retry_policy(),
         }
+
+    def webhook_subscription_stats(self, *, top_n: int = 10) -> list[dict[str, Any]]:
+        per_sub: dict[str, dict[str, Any]] = {}
+        for sub_id, sub in self.webhook_subscriptions.items():
+            per_sub[sub_id] = {
+                "subscription_id": sub_id,
+                "name": sub.get("name"),
+                "owner": sub.get("owner"),
+                "url": sub.get("url"),
+                "deliveries": 0,
+                "delivered": 0,
+                "failed": 0,
+                "retrying": 0,
+                "throttled": 0,
+                "dlq": 0,
+                "max_retries": sub.get("max_retries"),
+                "rate_limit_per_minute": sub.get("rate_limit_per_minute"),
+            }
+        for item in self.webhook_deliveries:
+            sub_id = item.get("subscription_id")
+            if sub_id not in per_sub:
+                per_sub[sub_id] = {
+                    "subscription_id": sub_id,
+                    "name": None,
+                    "owner": None,
+                    "url": None,
+                    "deliveries": 0,
+                    "delivered": 0,
+                    "failed": 0,
+                    "retrying": 0,
+                    "throttled": 0,
+                    "dlq": 0,
+                    "max_retries": None,
+                    "rate_limit_per_minute": None,
+                }
+            row = per_sub[sub_id]
+            row["deliveries"] += 1
+            status = str(item.get("status"))
+            if status in {"delivered", "failed", "retrying", "throttled", "dlq"}:
+                row[status] += 1
+        rows = list(per_sub.values())
+        for row in rows:
+            total = int(row["deliveries"])
+            row["success_rate_pct"] = round((row["delivered"] / total) * 100, 2) if total else 0.0
+        rows.sort(key=lambda x: (x["failed"] + x["dlq"], -x["success_rate_pct"]), reverse=True)
+        return rows[:top_n]
 
     def metrics_summary(self) -> dict[str, Any]:
         webhook = self.webhook_stats()
@@ -1346,5 +1486,6 @@ class QuantStore:
             "webhook_subscriptions": list(self.webhook_subscriptions.values()),
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,
+            "webhook_dlq": self.webhook_dlq,
             "calendar_events": list(self.calendar_events.values()),
         }

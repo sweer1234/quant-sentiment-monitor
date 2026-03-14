@@ -587,6 +587,12 @@ curl -s -X POST "http://127.0.0.1:8000/api/v1/webhooks/retry-failures?limit=20" 
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
 curl -s "http://127.0.0.1:8000/api/v1/webhooks/stats" \
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
+curl -s "http://127.0.0.1:8000/api/v1/webhooks/stats/subscriptions?top_n=10" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+curl -s "http://127.0.0.1:8000/api/v1/webhooks/dlq?status=pending_replay" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+curl -s -X POST "http://127.0.0.1:8000/api/v1/webhooks/dlq/replay?limit=20" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
 ```
 
 ---

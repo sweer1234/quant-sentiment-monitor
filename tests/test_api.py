@@ -271,6 +271,7 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
             "events": ["event.created"],
             "enabled": True,
             "max_retries": 1,
+            "rate_limit_per_minute": 1000,
         },
     )
     assert failing_webhook.status_code == 200
@@ -279,18 +280,54 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     # Process twice to make the failing webhook reach failed status.
     client.post("/api/v1/webhooks/queue/process?limit=50&ignore_schedule=true", headers=admin_headers)
     client.post("/api/v1/webhooks/queue/process?limit=50&ignore_schedule=true", headers=admin_headers)
-    failed_deliveries = client.get(f"/api/v1/webhooks/deliveries?subscription_id={failing_id}&status=failed", headers=admin_headers)
-    assert failed_deliveries.status_code == 200
-    assert failed_deliveries.json()["total"] >= 1
+    dlq_deliveries = client.get(f"/api/v1/webhooks/deliveries?subscription_id={failing_id}&status=dlq", headers=admin_headers)
+    assert dlq_deliveries.status_code == 200
+    assert dlq_deliveries.json()["total"] >= 1
 
-    retry = client.post("/api/v1/webhooks/retry-failures?limit=10", headers=admin_headers)
-    assert retry.status_code == 200
-    assert retry.json()["retried"] >= 1
+    dlq_items = client.get("/api/v1/webhooks/dlq?status=pending_replay", headers=admin_headers)
+    assert dlq_items.status_code == 200
+    assert dlq_items.json()["total"] >= 1
+
+    replay = client.post("/api/v1/webhooks/dlq/replay?limit=10", headers=admin_headers)
+    assert replay.status_code == 200
+    assert replay.json()["replayed"] >= 1
+    replay_process = client.post("/api/v1/webhooks/queue/process?limit=50&ignore_schedule=true", headers=admin_headers)
+    assert replay_process.status_code == 200
+
+    sub_stats = client.get("/api/v1/webhooks/stats/subscriptions?top_n=5", headers=admin_headers)
+    assert sub_stats.status_code == 200
+    assert sub_stats.json()["total"] >= 1
+
+    throttled_webhook = client.post(
+        "/api/v1/webhooks/subscriptions",
+        headers=admin_headers,
+        json={
+            "name": "throttled-hook",
+            "url": "https://example.com/throttle",
+            "events": ["event.created"],
+            "enabled": True,
+            "rate_limit_per_minute": 1,
+        },
+    )
+    assert throttled_webhook.status_code == 200
+    throttled_id = throttled_webhook.json()["subscription_id"]
+    client.post("/api/v1/webhooks/dispatch-test", headers=admin_headers)
+    client.post("/api/v1/webhooks/dispatch-test", headers=admin_headers)
+    throttled_process = client.post("/api/v1/webhooks/queue/process?limit=200&ignore_schedule=true", headers=admin_headers)
+    assert throttled_process.status_code == 200
+    throttled_deliveries = client.get(
+        f"/api/v1/webhooks/deliveries?subscription_id={throttled_id}&status=throttled",
+        headers=admin_headers,
+    )
+    assert throttled_deliveries.status_code == 200
+    assert throttled_deliveries.json()["total"] >= 1
 
     delete_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{webhook_id}", headers=admin_headers)
     assert delete_webhook.status_code == 200
     delete_failing_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{failing_id}", headers=admin_headers)
     assert delete_failing_webhook.status_code == 200
+    delete_throttled_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{throttled_id}", headers=admin_headers)
+    assert delete_throttled_webhook.status_code == 200
 
 
 def test_auth_and_permission_denied_paths() -> None:
@@ -365,6 +402,10 @@ def test_auth_and_permission_denied_paths() -> None:
     assert denied_webhook_process.status_code == 403
     denied_webhook_stats = client.get("/api/v1/webhooks/stats", headers=analyst_headers)
     assert denied_webhook_stats.status_code == 403
+    denied_webhook_dlq = client.get("/api/v1/webhooks/dlq", headers=analyst_headers)
+    assert denied_webhook_dlq.status_code == 403
+    denied_webhook_replay = client.post("/api/v1/webhooks/dlq/replay", headers=analyst_headers)
+    assert denied_webhook_replay.status_code == 403
     denied_metrics = client.get("/api/v1/metrics/summary", headers=analyst_headers)
     assert denied_metrics.status_code == 403
 
