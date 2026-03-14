@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
@@ -23,6 +23,7 @@ from .models import (
     SourcesBatchRequest,
     TopicSubscriptionRequest,
     UserPreferences,
+    WebhookSubscriptionRequest,
 )
 from .settings import Settings
 from .store import QuantStore
@@ -33,7 +34,7 @@ store = QuantStore(settings=settings)
 
 app = FastAPI(
     title="Quant Sentiment Monitor API",
-    version="0.1.0",
+    version="0.3.0",
     description="MVP backend for financial sentiment and event impact monitoring.",
 )
 
@@ -54,11 +55,36 @@ def get_current_user(authorization: str = Header(default="", alias="Authorizatio
     return username
 
 
+def require_permission(action: str):
+    def _dependency(username: str = Depends(get_current_user)) -> str:
+        if not store.has_permission(username, action):
+            raise HTTPException(status_code=403, detail=f"permission denied: {action}")
+        return username
+
+    return _dependency
+
+
+def require_public_or_permission(action: str):
+    def _dependency(authorization: str = Header(default="", alias="Authorization")) -> str:
+        expected = f"Bearer {settings.public_api_token}"
+        if authorization == expected:
+            return "public_token"
+        if authorization.startswith("Bearer "):
+            token = authorization.split(" ", 1)[1].strip()
+            username = store.username_by_token(token)
+            if username and store.has_permission(username, action):
+                return username
+            raise HTTPException(status_code=403, detail=f"permission denied: {action}")
+        raise HTTPException(status_code=401, detail="Invalid or missing authorization")
+
+    return _dependency
+
+
 @app.get("/")
 def root() -> dict[str, str]:
     return {
         "service": settings.app_name,
-        "version": "0.2.0",
+        "version": "0.3.0",
         "docs": "/docs",
         "health": "/api/v1/health",
         "openapi": "/openapi.json",
@@ -194,17 +220,24 @@ def list_sources(
 
 
 @app.patch("/api/v1/sources/{source_id}")
-def patch_source(source_id: str, request: SourcePatchRequest, _: None = Depends(require_token)) -> dict[str, Any]:
+def patch_source(
+    source_id: str,
+    request: SourcePatchRequest,
+    _: str = Depends(require_public_or_permission("sources.write")),
+) -> dict[str, Any]:
     return store.patch_source(source_id=source_id, patch_data=request.model_dump())
 
 
 @app.post("/api/v1/sources/batch")
-def batch_sources(request: SourcesBatchRequest, _: None = Depends(require_token)) -> dict[str, Any]:
+def batch_sources(
+    request: SourcesBatchRequest,
+    _: str = Depends(require_public_or_permission("sources.write")),
+) -> dict[str, Any]:
     return store.batch_update_sources([item.model_dump() for item in request.operations])
 
 
 @app.post("/api/v1/sources/reload")
-def reload_sources(_: None = Depends(require_token)) -> dict[str, Any]:
+def reload_sources(_: str = Depends(require_public_or_permission("sources.write"))) -> dict[str, Any]:
     return store.reload_configs()
 
 
@@ -243,7 +276,7 @@ def get_manual_message(manual_message_id: str) -> dict[str, Any]:
 def review_manual_message(
     manual_message_id: str,
     request: ManualMessageReviewRequest,
-    _: None = Depends(require_token),
+    _: str = Depends(require_public_or_permission("manual.review")),
 ) -> dict[str, Any]:
     record = store.review_manual_message(manual_message_id=manual_message_id, action=request.action)
     if not record:
@@ -328,12 +361,16 @@ def get_alert_policies(_: str = Depends(get_current_user)) -> dict[str, Any]:
 
 
 @app.put("/api/v1/alerts/policies")
-def put_alert_policies(request: AlertPolicyUpdateRequest, _: str = Depends(get_current_user)) -> dict[str, Any]:
+def put_alert_policies(request: AlertPolicyUpdateRequest, _: str = Depends(require_permission("alerts.write"))) -> dict[str, Any]:
     return store.update_alert_policies(request.model_dump())
 
 
 @app.post("/api/v1/alerts/{alert_id}/revoke")
-def revoke_alert(alert_id: str, reason: str = Query(default="manual_recall"), _: str = Depends(get_current_user)) -> dict[str, Any]:
+def revoke_alert(
+    alert_id: str,
+    reason: str = Query(default="manual_recall"),
+    _: str = Depends(require_permission("alerts.revoke")),
+) -> dict[str, Any]:
     return store.revoke_alert(alert_id=alert_id, reason=reason)
 
 
@@ -346,7 +383,11 @@ def event_credibility(event_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/v1/feedback/events/{event_id}")
-def event_feedback(event_id: str, request: FeedbackRequest, username: str = Depends(get_current_user)) -> dict[str, Any]:
+def event_feedback(
+    event_id: str,
+    request: FeedbackRequest,
+    username: str = Depends(require_permission("feedback.write")),
+) -> dict[str, Any]:
     if event_id not in store.events:
         raise HTTPException(status_code=404, detail="event not found")
     return store.add_feedback(username=username, event_id=event_id, payload=request.model_dump())
@@ -360,3 +401,68 @@ def billing_usage(tenant_id: str = Query(...), period: str = Query(...), _: str 
 @app.get("/api/v1/sla/status")
 def sla_status(tenant_id: str = Query(...), _: str = Depends(get_current_user)) -> dict[str, Any]:
     return store.sla_status(tenant_id=tenant_id)
+
+
+@app.get("/api/v1/calendar/events")
+def list_calendar_events(
+    country: str | None = Query(default=None),
+    importance_min: str | None = Query(default=None),
+    from_date: date | None = Query(default=None, alias="from"),
+    to_date: date | None = Query(default=None, alias="to"),
+) -> dict[str, Any]:
+    events = store.list_calendar_events(
+        country=country,
+        importance_min=importance_min,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    return {"total": len(events), "events": events}
+
+
+@app.get("/api/v1/calendar/events/{calendar_event_id}/surprise")
+def get_calendar_surprise(calendar_event_id: str) -> dict[str, Any]:
+    result = store.calendar_surprise(calendar_event_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="calendar event not found")
+    return result
+
+
+@app.post("/api/v1/calendar/events")
+def upsert_calendar_event(
+    payload: dict[str, Any],
+    _: str = Depends(require_permission("calendar.manage")),
+) -> dict[str, Any]:
+    return store.upsert_calendar_event(payload)
+
+
+@app.get("/api/v1/webhooks/subscriptions")
+def list_webhooks(username: str = Depends(require_permission("webhooks.manage"))) -> dict[str, Any]:
+    rows = store.list_webhook_subscriptions(username=username)
+    return {"total": len(rows), "subscriptions": rows}
+
+
+@app.post("/api/v1/webhooks/subscriptions")
+def create_webhook(
+    request: WebhookSubscriptionRequest,
+    username: str = Depends(require_permission("webhooks.manage")),
+) -> dict[str, Any]:
+    return store.create_webhook_subscription(username=username, payload=request.model_dump())
+
+
+@app.delete("/api/v1/webhooks/subscriptions/{subscription_id}")
+def delete_webhook(
+    subscription_id: str,
+    username: str = Depends(require_permission("webhooks.manage")),
+) -> dict[str, Any]:
+    ok = store.delete_webhook_subscription(subscription_id=subscription_id, username=username)
+    if not ok:
+        raise HTTPException(status_code=404, detail="subscription not found or not allowed")
+    return {"subscription_id": subscription_id, "status": "deleted"}
+
+
+@app.post("/api/v1/webhooks/dispatch-test")
+def webhook_dispatch_test(
+    event_id: str | None = Query(default=None),
+    _: str = Depends(require_permission("webhooks.manage")),
+) -> dict[str, Any]:
+    return store.dispatch_webhook_test(event_id=event_id)

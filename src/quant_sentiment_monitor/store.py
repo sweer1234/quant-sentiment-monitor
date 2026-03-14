@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from copy import deepcopy
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -44,6 +44,7 @@ class QuantStore:
         self.portfolio_impact_rules: dict[str, Any] = {}
         self.feedback_learning_rules: dict[str, Any] = {}
         self.billing_sla_rules: dict[str, Any] = {}
+        self.event_calendar_rules: dict[str, Any] = {}
         self.events: dict[str, Event] = {}
         self.manual_messages: dict[str, ManualMessageRecord] = {}
         self.alert_policies: dict[str, Any] = {
@@ -63,9 +64,12 @@ class QuantStore:
         self.user_topic_subscriptions: dict[str, set[str]] = {}
         self.revoked_alerts: dict[str, dict[str, Any]] = {}
         self.feedback_records: list[dict[str, Any]] = []
+        self.webhook_subscriptions: dict[str, dict[str, Any]] = {}
+        self.calendar_events: dict[str, dict[str, Any]] = {}
         self._source_by_id: dict[str, dict[str, Any]] = {}
         self.reload_configs()
         self._seed_events()
+        self._seed_calendar_events()
 
     def reload_configs(self) -> dict[str, Any]:
         with self._lock:
@@ -81,6 +85,7 @@ class QuantStore:
             self.portfolio_impact_rules = _load_yaml(self.settings.portfolio_impact_rules_path)
             self.feedback_learning_rules = _load_yaml(self.settings.feedback_learning_rules_path)
             self.billing_sla_rules = _load_yaml(self.settings.billing_sla_rules_path)
+            self.event_calendar_rules = _load_yaml(self.settings.event_calendar_rules_path)
 
             defaults = default_data.get("sources", [])
             if not isinstance(defaults, list):
@@ -167,6 +172,48 @@ class QuantStore:
         for source_id, title, content in seeded:
             event = self._build_event(source_id=source_id, title=title, content=content)
             self.events[event.event_id] = event
+
+    def _seed_calendar_events(self) -> None:
+        if self.calendar_events:
+            return
+        base = now_utc()
+        seeded = [
+            {
+                "calendar_event_id": "cal_us_cpi_next",
+                "country": "US",
+                "event_name": "US CPI YoY",
+                "importance_level": "P0",
+                "event_time": (base + timedelta(days=2)).isoformat(),
+                "consensus": 3.2,
+                "actual": None,
+                "unit": "%",
+                "source": "bls",
+            },
+            {
+                "calendar_event_id": "cal_us_nfp_last",
+                "country": "US",
+                "event_name": "US Nonfarm Payrolls",
+                "importance_level": "P1",
+                "event_time": (base - timedelta(days=8)).isoformat(),
+                "consensus": 180.0,
+                "actual": 235.0,
+                "unit": "k",
+                "source": "bls",
+            },
+            {
+                "calendar_event_id": "cal_eu_rate_next",
+                "country": "EU",
+                "event_name": "ECB Rate Decision",
+                "importance_level": "P0",
+                "event_time": (base + timedelta(days=5)).isoformat(),
+                "consensus": 4.0,
+                "actual": None,
+                "unit": "%",
+                "source": "ecb",
+            },
+        ]
+        for item in seeded:
+            self.calendar_events[item["calendar_event_id"]] = item
 
     def list_sources(self, *, enabled: bool | None = None, tier: int | None = None, region: str | None = None, category: str | None = None) -> list[dict[str, Any]]:
         result = []
@@ -409,6 +456,26 @@ class QuantStore:
     def username_by_token(self, token: str) -> str | None:
         return self.tokens.get(token)
 
+    def user_role(self, username: str) -> str:
+        return str(self.users.get(username, {}).get("role", "analyst"))
+
+    def has_permission(self, username: str, action: str) -> bool:
+        role = self.user_role(username)
+        permissions = {
+            "admin": {
+                "sources.write",
+                "alerts.write",
+                "alerts.revoke",
+                "manual.review",
+                "webhooks.manage",
+                "calendar.manage",
+                "feedback.write",
+            },
+            "trader": {"alerts.revoke", "feedback.write", "webhooks.manage"},
+            "analyst": {"feedback.write"},
+        }
+        return action in permissions.get(role, set())
+
     def get_user_profile(self, username: str) -> dict[str, Any]:
         user = self.users.get(username, {"role": "analyst"})
         return {
@@ -606,4 +673,119 @@ class QuantStore:
             "availability_rolling_30d": 99.97,
             "p95_latency_ms": 680,
             "status": "healthy",
+        }
+
+    def list_calendar_events(
+        self,
+        *,
+        country: str | None,
+        importance_min: str | None,
+        from_date: date | None,
+        to_date: date | None,
+    ) -> list[dict[str, Any]]:
+        rank = {"P0": 3, "P1": 2, "P2": 1}
+        min_rank = rank.get(importance_min or "P2", 1)
+        items = []
+        for item in self.calendar_events.values():
+            event_dt = datetime.fromisoformat(str(item.get("event_time")))
+            if country and str(item.get("country", "")).upper() != country.upper():
+                continue
+            if rank.get(str(item.get("importance_level", "P2")), 1) < min_rank:
+                continue
+            if from_date and event_dt.date() < from_date:
+                continue
+            if to_date and event_dt.date() > to_date:
+                continue
+            items.append(deepcopy(item))
+        items.sort(key=lambda row: row["event_time"])
+        return items
+
+    def calendar_surprise(self, calendar_event_id: str) -> dict[str, Any] | None:
+        item = self.calendar_events.get(calendar_event_id)
+        if not item:
+            return None
+        consensus = item.get("consensus")
+        actual = item.get("actual")
+        if actual is None or consensus is None:
+            return {
+                "calendar_event_id": calendar_event_id,
+                "status": "pending",
+                "message": "actual value not released",
+            }
+        surprise = 0.0 if float(consensus) == 0 else (float(actual) - float(consensus)) / abs(float(consensus))
+        surprise = round(surprise, 4)
+        direction = "positive" if surprise > 0 else "negative" if surprise < 0 else "neutral"
+        return {
+            "calendar_event_id": calendar_event_id,
+            "status": "available",
+            "consensus": consensus,
+            "actual": actual,
+            "surprise_ratio": surprise,
+            "direction": direction,
+        }
+
+    def upsert_calendar_event(self, payload: dict[str, Any]) -> dict[str, Any]:
+        event_id = payload.get("calendar_event_id") or f"cal_{uuid4().hex[:10]}"
+        current = self.calendar_events.get(event_id, {})
+        current.update(payload)
+        current["calendar_event_id"] = event_id
+        current.setdefault("importance_level", "P1")
+        current.setdefault("event_time", now_utc().isoformat())
+        self.calendar_events[event_id] = current
+        return deepcopy(current)
+
+    def create_webhook_subscription(self, username: str, payload: dict[str, Any]) -> dict[str, Any]:
+        subscription_id = f"wh_{uuid4().hex[:10]}"
+        record = {
+            "subscription_id": subscription_id,
+            "owner": username,
+            "name": payload.get("name", subscription_id),
+            "url": payload.get("url"),
+            "events": payload.get("events", ["event.created"]),
+            "enabled": bool(payload.get("enabled", True)),
+            "secret": payload.get("secret"),
+            "created_at": now_utc().isoformat(),
+            "last_delivery_at": None,
+            "deliveries": 0,
+        }
+        self.webhook_subscriptions[subscription_id] = record
+        return deepcopy(record)
+
+    def list_webhook_subscriptions(self, username: str | None = None) -> list[dict[str, Any]]:
+        rows = []
+        for record in self.webhook_subscriptions.values():
+            if username and record.get("owner") != username:
+                continue
+            rows.append(deepcopy(record))
+        rows.sort(key=lambda item: item["created_at"], reverse=True)
+        return rows
+
+    def delete_webhook_subscription(self, subscription_id: str, username: str) -> bool:
+        record = self.webhook_subscriptions.get(subscription_id)
+        if not record:
+            return False
+        if record.get("owner") != username and self.user_role(username) != "admin":
+            return False
+        del self.webhook_subscriptions[subscription_id]
+        return True
+
+    def dispatch_webhook_test(self, event_id: str | None = None) -> dict[str, Any]:
+        delivered = 0
+        sample_event = None
+        if event_id and event_id in self.events:
+            sample_event = self.events[event_id].model_dump(mode="json")
+        elif self.events:
+            sample_event = next(iter(self.events.values())).model_dump(mode="json")
+        now = now_utc().isoformat()
+        for subscription in self.webhook_subscriptions.values():
+            if not subscription.get("enabled", True):
+                continue
+            subscription["deliveries"] = int(subscription.get("deliveries", 0)) + 1
+            subscription["last_delivery_at"] = now
+            delivered += 1
+        return {
+            "status": "ok",
+            "delivered_subscriptions": delivered,
+            "event_id": sample_event.get("event_id") if sample_event else None,
+            "dispatched_at": now,
         }

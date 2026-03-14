@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -194,3 +194,18 @@ class FeedbackRequest(BaseModel):
     feedback_type: Literal["relevant", "not_relevant", "wrong_direction", "helpful"]
     score: int = Field(ge=1, le=5)
     comment: str = ""
+
+
+class WebhookSubscriptionRequest(BaseModel):
+    name: str
+    url: str
+    events: list[str] = Field(default_factory=lambda: ["event.created", "alert.triggered"])
+    enabled: bool = True
+    secret: str | None = None
+
+
+class CalendarEventsQuery(BaseModel):
+    country: str | None = None
+    importance_min: Literal["P0", "P1", "P2"] | None = None
+    from_date: date | None = None
+    to_date: date | None = None

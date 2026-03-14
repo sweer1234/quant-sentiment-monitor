@@ -548,6 +548,27 @@ curl -s "http://127.0.0.1:8000/api/v1/users/me/feed?page=1&page_size=5" \
   -H "Authorization: Bearer ${TOKEN}"
 ```
 
+### 6.9 日历/Webhook/RBAC 验收（示例）
+
+```bash
+# 管理员账号（具备 alerts.write / webhooks.manage / calendar.manage 权限）
+ADMIN_TOKEN=$(curl -s http://127.0.0.1:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"sweer1234","password":"dev123"}' | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])")
+
+# 事件日历与预期差
+curl -s "http://127.0.0.1:8000/api/v1/calendar/events?country=US&importance_min=P1"
+curl -s "http://127.0.0.1:8000/api/v1/calendar/events/cal_us_nfp_last/surprise"
+
+# 创建 Webhook 订阅并触发一次测试分发
+curl -s -X POST "http://127.0.0.1:8000/api/v1/webhooks/subscriptions" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"local-test","url":"https://example.com/webhook","events":["event.created","alert.triggered"]}'
+curl -s -X POST "http://127.0.0.1:8000/api/v1/webhooks/dispatch-test" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+```
+
 ---
 
 ## 7. 配置说明

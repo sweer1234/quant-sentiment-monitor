@@ -108,6 +108,7 @@ def test_manual_message_flow() -> None:
 
 def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     headers = _login_headers()
+    admin_headers = _login_headers(username="sweer1234", password="dev123")
     me = client.get("/api/v1/users/me", headers=headers)
     assert me.status_code == 200
     assert me.json()["username"] == "demo"
@@ -163,13 +164,13 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
 
     update = client.put(
         "/api/v1/alerts/policies",
-        headers=headers,
+        headers=admin_headers,
         json={"dedup_window_minutes": 30, "allow_revoke": True},
     )
     assert update.status_code == 200
     assert update.json()["dedup_window_minutes"] == 30
 
-    revoke = client.post("/api/v1/alerts/alert_test_001/revoke?reason=test", headers=headers)
+    revoke = client.post("/api/v1/alerts/alert_test_001/revoke?reason=test", headers=admin_headers)
     assert revoke.status_code == 200
     assert revoke.json()["status"] == "revoked"
 
@@ -187,3 +188,43 @@ def test_user_topic_portfolio_alert_and_sla_flow() -> None:
     assert billing.status_code == 200
     sla = client.get("/api/v1/sla/status?tenant_id=t001", headers=headers)
     assert sla.status_code == 200
+
+    calendar = client.get("/api/v1/calendar/events?country=US&importance_min=P1")
+    assert calendar.status_code == 200
+    assert calendar.json()["total"] >= 1
+    calendar_id = calendar.json()["events"][0]["calendar_event_id"]
+    surprise = client.get(f"/api/v1/calendar/events/{calendar_id}/surprise")
+    assert surprise.status_code == 200
+
+    upsert_calendar = client.post(
+        "/api/v1/calendar/events",
+        headers=admin_headers,
+        json={
+            "country": "CN",
+            "event_name": "NBS PMI",
+            "importance_level": "P1",
+            "consensus": 50.1,
+            "actual": 50.4,
+            "unit": "%",
+        },
+    )
+    assert upsert_calendar.status_code == 200
+
+    created_webhook = client.post(
+        "/api/v1/webhooks/subscriptions",
+        headers=admin_headers,
+        json={
+            "name": "test-webhook",
+            "url": "https://example.com/webhook",
+            "events": ["event.created", "alert.triggered"],
+            "enabled": True,
+        },
+    )
+    assert created_webhook.status_code == 200
+    webhook_id = created_webhook.json()["subscription_id"]
+    list_webhook = client.get("/api/v1/webhooks/subscriptions", headers=admin_headers)
+    assert list_webhook.status_code == 200
+    dispatch = client.post("/api/v1/webhooks/dispatch-test", headers=admin_headers)
+    assert dispatch.status_code == 200
+    delete_webhook = client.delete(f"/api/v1/webhooks/subscriptions/{webhook_id}", headers=admin_headers)
+    assert delete_webhook.status_code == 200

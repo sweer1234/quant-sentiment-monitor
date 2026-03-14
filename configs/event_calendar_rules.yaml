@@ -1,0 +1,19 @@
+version: 1
+last_updated: "2026-03-14"
+description: "Scheduled macro event calendar and surprise rules."
+
+calendar_sources:
+  - federal_reserve
+  - bls
+  - ecb
+  - nbs_cn
+
+surprise_formula:
+  numeric: "(actual - consensus) / max(abs(consensus), 1e-6)"
+  directional:
+    hawkish: 1
+    dovish: -1
+
+importance_boost:
+  high_surprise_abs_gte: 0.2
+  boost_points: 8
