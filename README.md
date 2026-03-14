@@ -562,6 +562,7 @@ curl -s -X POST "http://127.0.0.1:8000/api/v1/events/batch-ingest" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"request_id":"batch-001","events":[{"source_id":"federal_reserve","title":"Fed 偏鹰派","content":"通胀风险仍高"},{"source_id":"opec","title":"OPEC 计划减产","content":"供给趋紧"}]}'
+# 同 request_id 重放会命中幂等缓存（idempotent_hit=true）
 ```
 
 ### 6.9 日历/Webhook/RBAC 验收（示例）

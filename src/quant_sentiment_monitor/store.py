@@ -72,6 +72,7 @@ class QuantStore:
         self.alert_escalations: list[dict[str, Any]] = []
         self.feedback_records: list[dict[str, Any]] = []
         self.ingest_stats: dict[str, int] = {"total": 0, "deduplicated": 0, "accepted": 0}
+        self.request_cache: dict[str, dict[str, Any]] = {}
         self.audit_logs: list[dict[str, Any]] = []
         self.webhook_subscriptions: dict[str, dict[str, Any]] = {}
         self.webhook_deliveries: list[dict[str, Any]] = []
@@ -150,6 +151,7 @@ class QuantStore:
             "user_topic_subscriptions": {k: sorted(v) for k, v in self.user_topic_subscriptions.items()},
             "feedback_records": self.feedback_records,
             "ingest_stats": self.ingest_stats,
+            "request_cache": self.request_cache,
             "audit_logs": self.audit_logs,
             "webhook_subscriptions": list(self.webhook_subscriptions.values()),
             "webhook_deliveries": self.webhook_deliveries,
@@ -181,6 +183,7 @@ class QuantStore:
             self.user_topic_subscriptions = {k: set(v) for k, v in dict(payload.get("user_topic_subscriptions", {})).items()}
             self.feedback_records = list(payload.get("feedback_records", []))
             self.ingest_stats = dict(payload.get("ingest_stats", {"total": 0, "deduplicated": 0, "accepted": 0}))
+            self.request_cache = dict(payload.get("request_cache", {}))
             self.audit_logs = list(payload.get("audit_logs", []))
             self.webhook_subscriptions = {
                 item["subscription_id"]: item for item in payload.get("webhook_subscriptions", []) if "subscription_id" in item
@@ -405,6 +408,12 @@ class QuantStore:
         }
 
     def batch_ingest_events(self, payloads: list[dict[str, Any]], request_id: str | None = None) -> dict[str, Any]:
+        if request_id and request_id in self.request_cache:
+            cached = deepcopy(self.request_cache[request_id])
+            cached["idempotent_hit"] = True
+            self._audit("event.batch_ingest.idempotent_hit", "system", {"request_id": request_id})
+            return cached
+
         results = []
         accepted = 0
         deduplicated = 0
@@ -420,14 +429,24 @@ class QuantStore:
             except Exception as exc:
                 rejected += 1
                 results.append({"ok": False, "error": str(exc), "event": item})
-        return {
+        response = {
             "request_id": request_id,
             "total": len(payloads),
             "accepted": accepted,
             "deduplicated": deduplicated,
             "rejected": rejected,
             "results": results,
+            "idempotent_hit": False,
         }
+        if request_id:
+            self.request_cache[request_id] = deepcopy(response)
+        self._audit(
+            "event.batch_ingest",
+            "system",
+            {"request_id": request_id, "total": len(payloads), "accepted": accepted, "deduplicated": deduplicated, "rejected": rejected},
+        )
+        self._persist_state()
+        return response
 
     def _seed_calendar_events(self) -> None:
         if self.calendar_events:
@@ -1709,6 +1728,7 @@ class QuantStore:
             "feedback_total": len(self.feedback_records),
             "audit_total": len(self.audit_logs),
             "ingest_stats": self.ingest_stats,
+            "request_cache_size": len(self.request_cache),
             "webhook": webhook,
         }
 
@@ -1723,6 +1743,7 @@ class QuantStore:
             "user_topic_subscriptions": {k: sorted(v) for k, v in self.user_topic_subscriptions.items()},
             "feedback_records": self.feedback_records,
             "ingest_stats": self.ingest_stats,
+            "request_cache": self.request_cache,
             "webhook_subscriptions": list(self.webhook_subscriptions.values()),
             "webhook_deliveries": self.webhook_deliveries,
             "webhook_queue": self.webhook_queue,
@@ -1791,6 +1812,7 @@ class QuantStore:
         incoming_stats = dict(payload.get("ingest_stats", {}))
         for field in ("total", "deduplicated", "accepted"):
             self.ingest_stats[field] = int(incoming_stats.get(field, self.ingest_stats.get(field, 0)))
+        self.request_cache.update(dict(payload.get("request_cache", {})))
 
         self._audit(
             "admin.state.import",
@@ -1817,6 +1839,7 @@ class QuantStore:
         self.user_topic_subscriptions = {}
         self.feedback_records = []
         self.ingest_stats = {"total": 0, "deduplicated": 0, "accepted": 0}
+        self.request_cache = {}
         self.webhook_subscriptions = {}
         self.webhook_deliveries = []
         self.webhook_queue = []

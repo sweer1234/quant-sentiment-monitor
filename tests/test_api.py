@@ -508,6 +508,24 @@ def test_event_ingest_and_alert_lifecycle() -> None:
     assert batch_ingest.json()["accepted"] >= 1
     assert batch_ingest.json()["deduplicated"] >= 1
     assert batch_ingest.json()["rejected"] >= 1
+    assert batch_ingest.json()["idempotent_hit"] is False
+
+    batch_ingest_again = client.post(
+        "/api/v1/events/batch-ingest",
+        headers=analyst_headers,
+        json={
+            "request_id": "batch-r1",
+            "events": [
+                {
+                    "source_id": "federal_reserve",
+                    "title": "Fed 官方声明偏鹰派",
+                    "content": "政策声明强调通胀风险，市场提高加息预期。",
+                }
+            ],
+        },
+    )
+    assert batch_ingest_again.status_code == 200
+    assert batch_ingest_again.json()["idempotent_hit"] is True
 
     event_detail = client.get(f"/api/v1/events/id/{event_id}")
     assert event_detail.status_code == 200
