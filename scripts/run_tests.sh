@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "[0/4] Bootstrapping environment"
+bash scripts/bootstrap_cloud_env.sh --quiet
+
 echo "[1/4] Running lint"
 python3 -m ruff check .
 

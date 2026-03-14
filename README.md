@@ -505,6 +505,12 @@ pip install -r requirements.txt
 poetry install
 ```
 
+云端/新机器可直接执行：
+```bash
+bash scripts/bootstrap_cloud_env.sh
+```
+该脚本会检查并安装运行与测试所需依赖（含 SQLAlchemy、psycopg[binary]、redis、ruff）。
+
 ### 6.4 配置环境变量
 
 ```bash
@@ -1128,6 +1134,8 @@ python3 -m pytest
 bash scripts/run_tests.sh
 bash scripts/run_tests_cov.sh
 ```
+
+说明：`bash scripts/run_tests.sh` 会先自动执行环境依赖检查与补齐（`scripts/bootstrap_cloud_env.sh`），确保在云端新环境可直接跑通。
 
 CI 已内置：`.github/workflows/tests.yml`（push 到 `main` / PR 自动执行 pytest）。
 
