@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.responses import HTMLResponse
 from fastapi.responses import PlainTextResponse
@@ -402,9 +403,22 @@ def stream_events_metadata() -> dict[str, Any]:
 @app.websocket("/ws/events")
 async def websocket_events(websocket: WebSocket) -> None:
     await websocket.accept()
-    for event in store.list_events()[:10]:
-        await websocket.send_json(event.model_dump(mode="json"))
-    await websocket.close()
+    sent_ids: set[str] = set()
+    try:
+        while True:
+            for event in store.list_events()[:200]:
+                if event.event_id in sent_ids:
+                    continue
+                await websocket.send_json(event.model_dump(mode="json"))
+                sent_ids.add(event.event_id)
+            # Keep the connection alive so UI realtime badge stays connected.
+            await websocket.send_json({"type": "heartbeat", "time": datetime.now(timezone.utc).isoformat()})
+            # Avoid unbounded memory growth in long-lived sessions.
+            if len(sent_ids) > 5000:
+                sent_ids.clear()
+            await asyncio.sleep(5)
+    except WebSocketDisconnect:
+        return
 
 
 @app.post("/api/v1/impact/batch", response_model=ImpactBatchResponse)
