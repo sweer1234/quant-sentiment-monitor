@@ -37,6 +37,7 @@
           <div class="topbar-left">
             <strong id="breadcrumb">总览</strong>
             <span id="envBadge" class="badge">ENV: dev</span>
+            <span id="realtimeBadge" class="badge">实时: 断开</span>
           </div>
           <div class="topbar-right">
             <input id="globalSearchInput" placeholder="全局搜索事件/告警/来源..." />
@@ -70,6 +71,16 @@
                 <div id="dashboardHealth" class="mono"></div>
               </div>
             </div>
+            <div class="split-grid">
+              <div class="card">
+                <div class="section-head"><h3>事件等级分布</h3></div>
+                <canvas id="eventsLevelChart" height="190"></canvas>
+              </div>
+              <div class="card">
+                <div class="section-head"><h3>Top 市场热度</h3></div>
+                <canvas id="marketHeatChart" height="190"></canvas>
+              </div>
+            </div>
           </section>
 
           <section id="eventsView" class="view">
@@ -83,6 +94,7 @@
                 <button type="button" id="eventsExportBtn">导出JSON</button>
               </form>
               <div id="eventsTable" class="table"></div>
+              <div id="eventsPagination" class="pager"></div>
             </div>
             <div class="card">
               <div class="section-head"><h3>事件接入</h3></div>
@@ -112,7 +124,13 @@
                   <button id="alertsEscalateBtn" class="admin-only">批量升级</button>
                 </div>
               </div>
+              <div id="alertsBatchBar" class="actions-inline subtle">
+                <span id="alertsSelectedCount">已选 0 条</span>
+                <button id="alertsAckSelectedBtn">批量ACK</button>
+                <button id="alertsRevokeSelectedBtn">批量撤销</button>
+              </div>
               <div id="alertsTable" class="table"></div>
+              <div id="alertsPagination" class="pager"></div>
             </div>
           </section>
 
@@ -126,6 +144,7 @@
                 </div>
               </div>
               <div id="sourcesTable" class="table"></div>
+              <div id="sourcesPagination" class="pager"></div>
             </div>
             <div class="card">
               <h3>编辑来源</h3>
@@ -163,6 +182,7 @@
                   <button id="manualRefreshBtn">刷新</button>
                 </div>
                 <div id="manualTable" class="table"></div>
+                <div id="manualPagination" class="pager"></div>
               </div>
             </div>
           </section>
@@ -188,6 +208,7 @@
             <div class="card admin-only">
               <div class="section-head"><h3>用户计划与配额</h3><button id="usersRefreshBtn">刷新</button></div>
               <div id="usersTable" class="table"></div>
+              <div id="usersPagination" class="pager"></div>
             </div>
           </section>
 
@@ -204,6 +225,7 @@
             <div class="card">
               <div class="section-head"><h3>审计日志</h3><button id="auditRefreshBtn">刷新</button></div>
               <div id="auditTable" class="table"></div>
+              <div id="auditPagination" class="pager"></div>
             </div>
           </section>
         </main>

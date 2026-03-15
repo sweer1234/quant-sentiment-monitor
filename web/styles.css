@@ -106,6 +106,18 @@ body {
   font-size: 12px;
 }
 
+#realtimeBadge.live {
+  background: #173e2e;
+  border-color: #2e7a55;
+  color: #bdf3d8;
+}
+
+#realtimeBadge.offline {
+  background: #40232a;
+  border-color: #7b3a47;
+  color: #ffd2dc;
+}
+
 .content-area {
   padding: 12px;
   overflow: auto;
@@ -171,6 +183,11 @@ body {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.actions-inline.subtle {
+  color: #9fb2d3;
+  margin-bottom: 8px;
 }
 
 .form-grid {
@@ -251,6 +268,11 @@ button:hover {
   max-height: 420px;
 }
 
+.table.loading {
+  opacity: 0.6;
+  transition: opacity 0.15s ease-in-out;
+}
+
 .table table {
   width: 100%;
   border-collapse: collapse;
@@ -274,6 +296,28 @@ button:hover {
 
 .table tr:hover td {
   background: #1a2a47;
+}
+
+.table input[type="checkbox"] {
+  transform: translateY(1px);
+}
+
+.pager {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.pager button {
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.pager .page-info {
+  color: #9fb2d3;
+  font-size: 12px;
 }
 
 .mono {
@@ -327,6 +371,16 @@ button:hover {
   border-radius: 8px;
   padding: 8px;
   min-height: 18px;
+}
+
+#toast.warn {
+  border-color: #845f29;
+  color: #ffe2ac;
+}
+
+#toast.error {
+  border-color: #8d3242;
+  color: #ffd3dc;
 }
 
 @media (max-width: 1000px) {

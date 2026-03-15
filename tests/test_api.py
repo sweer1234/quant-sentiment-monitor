@@ -37,9 +37,13 @@ def test_ui_shell_assets() -> None:
     ui = client.get("/ui")
     assert ui.status_code == 200
     assert "金融舆情监控操作台" in ui.text
+    assert 'id="realtimeBadge"' in ui.text
+    assert 'id="eventsLevelChart"' in ui.text
+    assert 'id="alertsBatchBar"' in ui.text
     js = client.get("/web/app.js")
     assert js.status_code == 200
     assert "bootstrapAfterLogin" in js.text
+    assert "connectEventStream" in js.text
 
 
 def test_sources_list_and_patch() -> None:
