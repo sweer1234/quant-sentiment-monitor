@@ -33,6 +33,18 @@ def test_health() -> None:
     assert payload["sources"] > 0
 
 
+def test_stream_metadata_and_sse_once() -> None:
+    metadata = client.get("/api/v1/stream/events")
+    assert metadata.status_code == 200
+    assert metadata.json()["path"] == "/ws/events"
+    assert metadata.json()["sse_path"] == "/api/v1/stream/events/sse"
+
+    sse = client.get("/api/v1/stream/events/sse?once=true")
+    assert sse.status_code == 200
+    assert "text/event-stream" in sse.headers.get("content-type", "")
+    assert "event: heartbeat" in sse.text
+
+
 def test_ui_shell_assets() -> None:
     ui = client.get("/ui")
     assert ui.status_code == 200

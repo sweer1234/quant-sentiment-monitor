@@ -17,8 +17,11 @@
     liveEventIds: new Set(),
     liveStream: {
       socket: null,
+      source: null,
       retryTimer: null,
       path: "/ws/events",
+      ssePath: "/api/v1/stream/events/sse",
+      mode: "",
     },
     pagination: {
       events: { page: 1, size: 20 },
@@ -205,9 +208,9 @@
     return state.token ? { Authorization: `Bearer ${state.token}` } : {};
   }
 
-  function setRealtimeBadge(isLive) {
+  function setRealtimeBadge(isLive, mode = "") {
     const badge = $("realtimeBadge");
-    badge.textContent = isLive ? "实时: 已连接" : "实时: 断开";
+    badge.textContent = isLive ? `实时: 已连接${mode ? `(${mode})` : ""}` : "实时: 断开";
     badge.classList.toggle("live", isLive);
     badge.classList.toggle("offline", !isLive);
   }
@@ -776,7 +779,7 @@
     URL.revokeObjectURL(url);
   }
 
-  function scheduleWsReconnect() {
+  function scheduleStreamReconnect() {
     if (!state.token || state.liveStream.retryTimer) return;
     state.liveStream.retryTimer = window.setTimeout(() => {
       state.liveStream.retryTimer = null;
@@ -789,10 +792,15 @@
       clearTimeout(state.liveStream.retryTimer);
       state.liveStream.retryTimer = null;
     }
+    if (state.liveStream.source) {
+      state.liveStream.source.close();
+      state.liveStream.source = null;
+    }
     if (state.liveStream.socket) {
       state.liveStream.socket.close();
       state.liveStream.socket = null;
     }
+    state.liveStream.mode = "";
     setRealtimeBadge(false);
   }
 
@@ -833,19 +841,68 @@
       if (metadata.path) {
         state.liveStream.path = metadata.path;
       }
+      if (metadata.sse_path) {
+        state.liveStream.ssePath = metadata.sse_path;
+      }
     } catch (_err) {
       state.liveStream.path = "/ws/events";
+      state.liveStream.ssePath = "/api/v1/stream/events/sse";
     }
+
+    if ("EventSource" in window) {
+      try {
+        let opened = false;
+        const es = new EventSource(state.liveStream.ssePath);
+        state.liveStream.source = es;
+        state.liveStream.mode = "SSE";
+        setRealtimeBadge(false);
+        const openTimer = window.setTimeout(() => {
+          if (!opened && state.liveStream.source === es) {
+            es.close();
+            state.liveStream.source = null;
+            state.liveStream.mode = "";
+            connectEventStream().catch((err) => toast(`实时连接重试失败: ${err.message}`, "warn"));
+          }
+        }, 5000);
+        es.onopen = () => {
+          opened = true;
+          clearTimeout(openTimer);
+          setRealtimeBadge(true, "SSE");
+        };
+        es.addEventListener("event", (evt) => onLiveEvent(evt.data));
+        es.onmessage = (evt) => onLiveEvent(evt.data);
+        es.onerror = () => {
+          if (es.readyState === 2) {
+            if (state.liveStream.source === es) {
+              state.liveStream.source = null;
+              state.liveStream.mode = "";
+            }
+            setRealtimeBadge(false);
+            scheduleStreamReconnect();
+          } else {
+            // EventSource auto-reconnects for transient network errors.
+            setRealtimeBadge(true, "SSE");
+          }
+        };
+        return;
+      } catch (_err) {
+        state.liveStream.source = null;
+        state.liveStream.mode = "";
+      }
+    }
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}${state.liveStream.path}`;
     const socket = new WebSocket(wsUrl);
     state.liveStream.socket = socket;
-    socket.onopen = () => setRealtimeBadge(true);
+    state.liveStream.mode = "WS";
+    socket.onopen = () => setRealtimeBadge(true, "WS");
     socket.onerror = () => setRealtimeBadge(false);
     socket.onclose = () => {
       state.liveStream.socket = null;
+      state.liveStream.mode = "";
       setRealtimeBadge(false);
-      scheduleWsReconnect();
+      scheduleStreamReconnect();
     };
     socket.onmessage = (event) => onLiveEvent(event.data);
   }

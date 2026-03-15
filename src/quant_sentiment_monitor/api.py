@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, timezone
+import json
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, W
 from fastapi.responses import FileResponse
 from fastapi.responses import HTMLResponse
 from fastapi.responses import PlainTextResponse
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .models import (
@@ -395,9 +397,32 @@ def stream_events_metadata() -> dict[str, Any]:
     return {
         "protocol": "websocket",
         "path": "/ws/events",
+        "sse_path": "/api/v1/stream/events/sse",
         "sample_event_count": min(5, len(store.events)),
         "heartbeat_seconds": 10,
     }
+
+
+@app.get("/api/v1/stream/events/sse")
+async def stream_events_sse(once: bool = Query(default=False)) -> StreamingResponse:
+    async def _event_gen():
+        sent_ids: set[str] = set()
+        while True:
+            for event in store.list_events()[:200]:
+                if event.event_id in sent_ids:
+                    continue
+                sent_ids.add(event.event_id)
+                data = event.model_dump_json()
+                yield f"event: event\ndata: {data}\n\n"
+            heartbeat = {"type": "heartbeat", "time": datetime.now(timezone.utc).isoformat()}
+            yield f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
+            if once:
+                break
+            if len(sent_ids) > 5000:
+                sent_ids.clear()
+            await asyncio.sleep(5)
+
+    return StreamingResponse(_event_gen(), media_type="text/event-stream")
 
 
 @app.websocket("/ws/events")
