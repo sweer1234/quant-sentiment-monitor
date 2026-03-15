@@ -1,0 +1,11 @@
+{
+  "install": "bash scripts/bootstrap_cloud_env.sh --quiet",
+  "start": "bash scripts/cloud_agent_startup.sh",
+  "env": {
+    "QSM_MODEL_BACKEND": "local",
+    "QSM_MODEL_SERVICE_URL": "http://127.0.0.1:9000/infer",
+    "QSM_MODEL_SERVICE_TIMEOUT_SEC": "3",
+    "QSM_NOTIFICATION_BACKEND": "mock",
+    "COMPOSE_PROFILES": "observability"
+  }
+}

@@ -7,7 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY requirements.txt /app/requirements.txt
 COPY requirements-dev.txt /app/requirements-dev.txt
-RUN pip install --no-cache-dir -r /app/requirements-dev.txt
+COPY scripts/bootstrap_cloud_env.sh /app/scripts/bootstrap_cloud_env.sh
+RUN bash /app/scripts/bootstrap_cloud_env.sh --quiet
 
 COPY . /app
 

@@ -1159,7 +1159,14 @@ bash scripts/run_tests_cov.sh
 
 说明：`bash scripts/run_tests.sh` 会先自动执行环境依赖检查与补齐（`scripts/bootstrap_cloud_env.sh`），确保在云端新环境可直接跑通。
 
-CI 已内置：`.github/workflows/tests.yml`（push 到 `main` / PR 自动执行 pytest）。
+CI 已内置：`.github/workflows/tests.yml`（push 到 `main` / PR 自动执行 `bash scripts/run_tests.sh`，持续验证开箱可用）。
+
+Cloud Agent 环境固化（仓库内）：
+- `.cursor/environment.json`
+  - `install`: `bash scripts/bootstrap_cloud_env.sh --quiet`
+  - `start`: `bash scripts/cloud_agent_startup.sh`
+  - 默认注入模型与观测配置：`QSM_MODEL_SERVICE_URL`、`QSM_MODEL_BACKEND`、`COMPOSE_PROFILES=observability`
+- `scripts/bootstrap_cloud_env.sh` 会校验并补齐 `pytest`、`ruff`、`SQLAlchemy`、`psycopg[binary]`、`redis`
 
 ### 12.3 质量门禁（建议）
 - PR 必须通过单测与静态检查
