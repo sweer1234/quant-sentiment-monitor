@@ -33,6 +33,8 @@ for m in modules:
 
 subprocess.check_call([sys.executable, "-m", "pytest", "--version"], stdout=subprocess.DEVNULL)
 subprocess.check_call([sys.executable, "-m", "ruff", "--version"], stdout=subprocess.DEVNULL)
+subprocess.check_call(["pytest", "--version"], stdout=subprocess.DEVNULL)
+subprocess.check_call(["ruff", "--version"], stdout=subprocess.DEVNULL)
 print("ok")
 PY
 }
