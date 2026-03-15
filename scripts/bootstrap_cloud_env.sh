@@ -9,6 +9,14 @@ elif [[ "${1:-}" == "--check-only" ]]; then
   CHECK_ONLY=1
 fi
 
+USER_BIN="$(python3 -c 'import site; print(site.USER_BASE + "/bin")')"
+if [[ -n "${USER_BIN}" && ":${PATH}:" != *":${USER_BIN}:"* ]]; then
+  export PATH="${USER_BIN}:${PATH}"
+  if [[ "${QUIET}" -ne 1 ]]; then
+    echo "[bootstrap] Added user bin to PATH: ${USER_BIN}"
+  fi
+fi
+
 check_runtime() {
   python3 - <<'PY'
 import importlib

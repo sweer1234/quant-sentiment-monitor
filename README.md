@@ -1167,6 +1167,7 @@ Cloud Agent 环境固化（仓库内）：
   - `start`: `bash scripts/cloud_agent_startup.sh`
   - 默认注入模型与观测配置：`QSM_MODEL_SERVICE_URL`、`QSM_MODEL_BACKEND`、`COMPOSE_PROFILES=observability`
 - `scripts/bootstrap_cloud_env.sh` 会校验并补齐 `pytest`、`ruff`、`SQLAlchemy`、`psycopg[binary]`、`redis`
+- 若依赖安装在用户目录，脚本会自动将 `~/.local/bin` 注入 PATH，保证 `pytest/ruff` 命令可直接调用
 
 ### 12.3 质量门禁（建议）
 - PR 必须通过单测与静态检查

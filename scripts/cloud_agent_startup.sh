@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
+USER_BIN="$(python3 -c 'import site; print(site.USER_BASE + "/bin")')"
+if [[ -n "${USER_BIN}" && ":${PATH}:" != *":${USER_BIN}:"* ]]; then
+  export PATH="${USER_BIN}:${PATH}"
+fi
+
 echo "[startup] Ensuring Python runtime dependencies ..."
 bash scripts/bootstrap_cloud_env.sh --quiet
 
