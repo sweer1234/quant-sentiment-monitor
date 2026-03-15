@@ -1165,6 +1165,7 @@ Cloud Agent 环境固化（仓库内）：
 - `.cursor/environment.json`
   - `install`: `bash scripts/bootstrap_cloud_env.sh --quiet`
   - `start`: `bash scripts/cloud_agent_startup.sh`
+  - `env.PATH` 默认包含 `/home/ubuntu/.local/bin`，确保 `pytest/ruff` 命令开箱可用
   - 默认注入模型与观测配置：`QSM_MODEL_SERVICE_URL`、`QSM_MODEL_BACKEND`、`COMPOSE_PROFILES=observability`
 - `scripts/bootstrap_cloud_env.sh` 会校验并补齐 `pytest`、`ruff`、`SQLAlchemy`、`psycopg[binary]`、`redis`
 - 若依赖安装在用户目录，脚本会自动将 `~/.local/bin` 注入 PATH，保证 `pytest/ruff` 命令可直接调用
