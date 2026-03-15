@@ -87,9 +87,10 @@
             <div class="card">
               <div class="section-head"><h3>事件中心</h3></div>
               <form id="eventsFilterForm" class="form-grid">
-                <label>市场 <input id="eventsFilterMarket" placeholder="fx/futures/..." /></label>
+                <label>市场（中/英） <input id="eventsFilterMarket" placeholder="外汇 / fx / futures / 股票..." /></label>
                 <label>最小分数 <input id="eventsFilterScore" type="number" min="0" max="100" value="0" /></label>
-                <label>关键词 <input id="eventsFilterKeyword" placeholder="关键词搜索标题" /></label>
+                <label>关键词（标题+内容） <input id="eventsFilterKeyword" placeholder="支持模糊搜索，如：美联储 加息" /></label>
+                <label>品种（代码/中英） <input id="eventsFilterInstrument" placeholder="DXY / 美元指数 / gold / 黄金" /></label>
                 <button type="submit">查询</button>
                 <button type="button" id="eventsExportBtn">导出JSON</button>
               </form>
@@ -115,10 +116,10 @@
                 <div class="actions-inline">
                   <select id="alertsStatusFilter">
                     <option value="">全部</option>
-                    <option value="active">active</option>
-                    <option value="acked">acked</option>
-                    <option value="escalated">escalated</option>
-                    <option value="revoked">revoked</option>
+                    <option value="active">活跃</option>
+                    <option value="acked">已确认</option>
+                    <option value="escalated">已升级</option>
+                    <option value="revoked">已撤销</option>
                   </select>
                   <button id="alertsRefreshBtn">刷新</button>
                   <button id="alertsEscalateBtn" class="admin-only">批量升级</button>
@@ -126,7 +127,7 @@
               </div>
               <div id="alertsBatchBar" class="actions-inline subtle">
                 <span id="alertsSelectedCount">已选 0 条</span>
-                <button id="alertsAckSelectedBtn">批量ACK</button>
+                <button id="alertsAckSelectedBtn">批量确认</button>
                 <button id="alertsRevokeSelectedBtn">批量撤销</button>
               </div>
               <div id="alertsTable" class="table"></div>
@@ -149,14 +150,14 @@
             <div class="card">
               <h3>编辑来源</h3>
               <form id="patchSourceForm" class="form-grid">
-                <label>source_id <input id="sourceIdInput" required /></label>
-                <label>enabled
+                <label>来源ID <input id="sourceIdInput" required /></label>
+                <label>是否启用
                   <select id="sourceEnabledInput">
                     <option value="true">true</option>
                     <option value="false">false</option>
                   </select>
                 </label>
-                <label>source_weight <input id="sourceWeightInput" value="0.8" type="number" step="0.01" /></label>
+                <label>来源权重 <input id="sourceWeightInput" value="0.8" type="number" step="0.01" /></label>
                 <button type="submit">保存</button>
               </form>
             </div>
@@ -169,7 +170,7 @@
                 <form id="manualForm" class="form-grid">
                   <label>标题 <input id="manualTitle" required /></label>
                   <label class="wide">内容 <textarea id="manualContent" rows="3" required></textarea></label>
-                  <label>录入人ID <input id="manualOperatorId" value="ui_operator" required /></label>
+                  <label>录入人ID <input id="manualOperatorId" required /></label>
                   <label>录入人角色 <input id="manualOperatorRole" value="analyst" required /></label>
                   <label>相关品种（逗号） <input id="manualInstruments" /></label>
                   <button type="submit">创建消息</button>
@@ -196,9 +197,9 @@
                 <label>品种（逗号） <input id="prefInstruments" placeholder="DXY,CL" /></label>
                 <label>最小告警级别
                   <select id="prefAlertLevel">
-                    <option value="P0">P0</option>
-                    <option value="P1">P1</option>
-                    <option value="P2" selected>P2</option>
+                    <option value="P0">紧急（P0）</option>
+                    <option value="P1">高（P1）</option>
+                    <option value="P2" selected>中（P2）</option>
                   </select>
                 </label>
                 <button type="submit">保存配置</button>
@@ -215,12 +216,28 @@
           <section id="adminView" class="view admin-only">
             <div class="card">
               <div class="section-head"><h3>系统运维面板</h3><button id="adminRefreshBtn">刷新</button></div>
+              <div class="kpi-grid admin-kpi-grid">
+                <div class="kpi-card"><span>模型后端</span><strong id="adminModelBackend">-</strong></div>
+                <div class="kpi-card"><span>采集队列后端</span><strong id="adminCollectorBackend">-</strong></div>
+                <div class="kpi-card"><span>采集队列堆积</span><strong id="adminCollectorQueueSize">-</strong></div>
+                <div class="kpi-card"><span>待发送通知</span><strong id="adminNotificationsQueued">-</strong></div>
+                <div class="kpi-card"><span>失败通知</span><strong id="adminNotificationsFailed">-</strong></div>
+                <div class="kpi-card"><span>审计总量</span><strong id="adminAuditTotal">-</strong></div>
+              </div>
               <div class="actions-inline">
                 <button id="processNotificationsBtn">处理通知</button>
                 <button id="retryNotificationsBtn">重试失败通知</button>
                 <button id="processCollectorTasksBtn">处理采集任务</button>
               </div>
-              <div id="adminInfo" class="mono"></div>
+              <form id="collectorRunForm" class="form-grid">
+                <label class="wide">手动采集指定数据源（可多选）
+                  <select id="collectorSourceIds" multiple size="6"></select>
+                </label>
+                <label>每次采集来源数上限 <input id="collectorLimitInput" type="number" min="1" max="200" value="20" /></label>
+                <label>抓取重试次数 <input id="collectorRetriesInput" type="number" min="0" max="5" value="2" /></label>
+                <button type="submit">按选中来源立即采集</button>
+              </form>
+              <div id="collectorRunResult" class="mono"></div>
             </div>
             <div class="card">
               <div class="section-head"><h3>审计日志</h3><button id="auditRefreshBtn">刷新</button></div>

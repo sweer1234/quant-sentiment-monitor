@@ -146,6 +146,10 @@ body {
   margin-bottom: 12px;
 }
 
+.admin-kpi-grid {
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+}
+
 .kpi-card {
   border: 1px solid #2b3e5f;
   background: #16233b;
@@ -223,6 +227,10 @@ button {
   color: #e6edf7;
   padding: 8px 9px;
   font-size: 13px;
+}
+
+select[multiple] {
+  min-height: 140px;
 }
 
 button {

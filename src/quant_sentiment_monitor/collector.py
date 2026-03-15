@@ -61,8 +61,17 @@ def _parse_feed_items(raw_text: str, *, max_items: int = 3) -> list[dict[str, st
     return items
 
 
-def run_collection_once(store: QuantStore, *, limit: int = 20, retries: int = 2) -> dict[str, Any]:
+def run_collection_once(
+    store: QuantStore,
+    *,
+    limit: int = 20,
+    retries: int = 2,
+    source_ids: list[str] | None = None,
+) -> dict[str, Any]:
     sources = store.list_polling_sources(limit=limit)
+    selected_ids = {item.strip().lower() for item in (source_ids or []) if item and item.strip()}
+    if selected_ids:
+        sources = [row for row in sources if str(row.get("source_id", "")).lower() in selected_ids]
     pulled = 0
     accepted = 0
     deduplicated = 0
@@ -105,6 +114,7 @@ def run_collection_once(store: QuantStore, *, limit: int = 20, retries: int = 2)
 
     return {
         "status": "ok",
+        "requested_sources": sorted(selected_ids),
         "sources_total": len(sources),
         "sources_pulled": pulled,
         "accepted": accepted,

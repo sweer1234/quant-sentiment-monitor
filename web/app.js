@@ -39,6 +39,59 @@
     usersPagination: "users",
     auditPagination: "audit",
   };
+  const LEVEL_LABELS = {
+    P0: "紧急（P0）",
+    P1: "高（P1）",
+    P2: "中（P2）",
+    P3: "低（P3）",
+  };
+  const ALERT_STATUS_LABELS = {
+    active: "活跃",
+    acked: "已确认",
+    escalated: "已升级",
+    revoked: "已撤销",
+    recovered: "已恢复",
+  };
+  const MANUAL_STATUS_LABELS = {
+    draft: "草稿",
+    submitted: "已提交",
+    auto_assessed: "自动评估",
+    approved: "已通过",
+    rejected: "已拒绝",
+    revoked: "已撤销",
+    published: "已发布",
+  };
+  const MARKET_ALIASES = {
+    fx: ["fx", "forex", "foreign exchange", "外汇"],
+    global_equity: ["global_equity", "global equity", "equity", "全球股市", "全球股票", "股市"],
+    stock: ["stock", "stocks", "equities", "a-share", "个股", "股票"],
+    futures: ["futures", "future", "commodity", "期货", "大宗商品"],
+    bond: ["bond", "bonds", "fixed income", "treasury", "国债", "债券", "固收"],
+    metals: ["metals", "gold", "silver", "precious", "贵金属", "黄金", "白银"],
+    derivatives: ["derivatives", "options", "futures options", "衍生品", "期权"],
+    crypto: ["crypto", "cryptocurrency", "digital asset", "数字货币", "加密", "加密货币"],
+  };
+  const INSTRUMENT_ALIASES = {
+    DXY: ["dxy", "dollar index", "usd index", "美元指数"],
+    EURUSD: ["eurusd", "eur/usd", "欧元美元"],
+    USDJPY: ["usdjpy", "usd/jpy", "美元日元"],
+    USDCAD: ["usdcad", "usd/cad", "美元加元"],
+    SPX: ["spx", "s&p500", "sp500", "标普500"],
+    NDX: ["ndx", "nasdaq100", "nas100", "纳斯达克100"],
+    HSI: ["hsi", "hang seng", "恒生指数"],
+    AAPL: ["aapl", "apple", "苹果"],
+    TSLA: ["tsla", "tesla", "特斯拉"],
+    XOM: ["xom", "exxon", "埃克森美孚"],
+    CL: ["cl", "wti", "crude oil", "原油"],
+    GC: ["gc", "gold futures", "黄金期货"],
+    NQ: ["nq", "nasdaq futures", "纳指期货"],
+    UST10Y: ["ust10y", "10y treasury", "10年美债", "美债10年"],
+    UST2Y: ["ust2y", "2y treasury", "2年美债", "美债2年"],
+    XAUUSD: ["xauusd", "gold spot", "黄金现货", "伦敦金"],
+    XAGUSD: ["xagusd", "silver spot", "白银现货", "伦敦银"],
+    BTCUSDT: ["btcusdt", "bitcoin", "btc", "比特币"],
+    ETHUSDT: ["ethusdt", "ethereum", "eth", "以太坊"],
+  };
 
   function toast(msg, level = "info") {
     const node = $("toast");
@@ -59,6 +112,93 @@
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
+  }
+
+  function normalizeSearchText(value) {
+    return String(value ?? "")
+      .toLowerCase()
+      .replaceAll(/[\s_\-\/\\,.;:|()[\]{}，。；：、]/g, "");
+  }
+
+  function splitSearchTerms(value) {
+    return String(value ?? "")
+      .split(/[,\s，、;；]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  function fuzzyIncludes(haystack, needle) {
+    if (!needle) return true;
+    const h = normalizeSearchText(haystack);
+    const n = normalizeSearchText(needle);
+    return n ? h.includes(n) : true;
+  }
+
+  function toLevelLabel(level) {
+    return LEVEL_LABELS[level] || `${level || "-"}（未映射）`;
+  }
+
+  function toAlertStatusLabel(status) {
+    return ALERT_STATUS_LABELS[status] || status || "-";
+  }
+
+  function toManualStatusLabel(status) {
+    return MANUAL_STATUS_LABELS[status] || status || "-";
+  }
+
+  function toMarketLabel(market) {
+    const key = String(market || "").toLowerCase();
+    const map = {
+      fx: "外汇",
+      global_equity: "全球股市",
+      stock: "个股",
+      futures: "期货",
+      bond: "债券/国债",
+      metals: "贵金属",
+      derivatives: "衍生品",
+      crypto: "数字货币",
+    };
+    return map[key] || market || "-";
+  }
+
+  function yesNo(value) {
+    return value ? "是" : "否";
+  }
+
+  function marketAliasText(market) {
+    const key = String(market || "").toLowerCase();
+    const aliases = MARKET_ALIASES[key] || [key];
+    return aliases.join(" ");
+  }
+
+  function getEventInstruments(row) {
+    const values = [];
+    if (Array.isArray(row?.impacted_instruments)) {
+      values.push(...row.impacted_instruments);
+    }
+    if (Array.isArray(row?.top_impacted_instruments)) {
+      values.push(...row.top_impacted_instruments);
+    }
+    if (Array.isArray(row?.impacts)) {
+      for (const item of row.impacts) {
+        if (item && item.instrument) values.push(item.instrument);
+      }
+    }
+    const seen = new Set();
+    const result = [];
+    for (const item of values) {
+      const code = String(item || "").toUpperCase();
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      result.push(code);
+    }
+    return result;
+  }
+
+  function instrumentAliasText(code) {
+    const normalized = String(code || "").toUpperCase();
+    const aliases = INSTRUMENT_ALIASES[normalized] || [normalized];
+    return aliases.join(" ");
   }
 
   function authHeaders() {
@@ -217,25 +357,45 @@
         marketMap[market] = (marketMap[market] || 0) + 1;
       }
     }
-    drawBarChart("eventsLevelChart", ["P0", "P1", "P2"], [levelMap.P0 || 0, levelMap.P1 || 0, levelMap.P2 || 0], "#4f81d8");
+    drawBarChart(
+      "eventsLevelChart",
+      ["紧急(P0)", "高(P1)", "中(P2)"],
+      [levelMap.P0 || 0, levelMap.P1 || 0, levelMap.P2 || 0],
+      "#4f81d8"
+    );
     const topMarkets = Object.entries(marketMap)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5);
     drawBarChart(
       "marketHeatChart",
-      topMarkets.map((item) => item[0]),
+      topMarkets.map((item) => toMarketLabel(item[0])),
       topMarkets.map((item) => item[1]),
       "#45a47a"
     );
   }
 
   function matchesEventFilter(row) {
-    const market = $("eventsFilterMarket").value.trim().toLowerCase();
+    const marketQuery = $("eventsFilterMarket").value.trim();
     const score = Number($("eventsFilterScore").value || "0");
-    const keyword = $("eventsFilterKeyword").value.trim().toLowerCase();
-    if (market && !(row.impacted_markets || []).map((item) => String(item).toLowerCase()).includes(market)) return false;
+    const keyword = $("eventsFilterKeyword").value.trim();
+    const instrumentQuery = $("eventsFilterInstrument").value.trim();
     if (Number.isFinite(score) && score > 0 && Number(row.importance_score || 0) < score) return false;
-    if (keyword && !String(row.title || "").toLowerCase().includes(keyword)) return false;
+    if (keyword) {
+      const contentText = `${row.title || ""} ${row.content || ""}`;
+      if (!fuzzyIncludes(contentText, keyword)) return false;
+    }
+    if (marketQuery) {
+      const terms = splitSearchTerms(marketQuery);
+      const marketTexts = (row.impacted_markets || []).map((item) => marketAliasText(item));
+      const marketMatched = terms.every((term) => marketTexts.some((text) => fuzzyIncludes(text, term)));
+      if (!marketMatched) return false;
+    }
+    if (instrumentQuery) {
+      const terms = splitSearchTerms(instrumentQuery);
+      const instrumentTexts = getEventInstruments(row).map((code) => `${code} ${instrumentAliasText(code)}`);
+      const instrumentMatched = terms.every((term) => instrumentTexts.some((text) => fuzzyIncludes(text, term)));
+      if (!instrumentMatched) return false;
+    }
     return true;
   }
 
@@ -246,10 +406,19 @@
       [
         { key: "detected_at", title: "时间", render: (r) => htmlEscape(String(r.detected_at || "").replace("T", " ").slice(0, 19)) },
         { key: "title", title: "标题" },
-        { key: "importance_level", title: "等级" },
+        { key: "content", title: "摘要", render: (r) => htmlEscape(String(r.content || "").slice(0, 80)) },
+        { key: "importance_level", title: "等级", render: (r) => htmlEscape(toLevelLabel(r.importance_level)) },
         { key: "importance_score", title: "分数" },
-        { key: "impacted_markets", title: "市场", render: (r) => htmlEscape((r.impacted_markets || []).join(",")) },
-        { key: "top_impacted_instruments", title: "Top品种", render: (r) => htmlEscape((r.top_impacted_instruments || []).join(",")) },
+        {
+          key: "impacted_markets",
+          title: "市场",
+          render: (r) => htmlEscape((r.impacted_markets || []).map((item) => toMarketLabel(item)).join(" / ")),
+        },
+        {
+          key: "impacted_instruments",
+          title: "影响品种",
+          render: (r) => htmlEscape(getEventInstruments(r).join(",")),
+        },
       ],
       pageData.rows,
       { eventid: "event_id" }
@@ -273,14 +442,14 @@
         { key: "selected", title: '<input id="selectAllAlerts" type="checkbox" />', render: (r) => `<input type="checkbox" data-alert-check="${htmlEscape(r.alert_id)}" ${state.selectedAlerts.has(r.alert_id) ? "checked" : ""} />` },
         { key: "alert_id", title: "告警ID" },
         { key: "title", title: "标题" },
-        { key: "importance_level", title: "等级" },
-        { key: "status", title: "状态" },
+        { key: "importance_level", title: "等级", render: (r) => htmlEscape(toLevelLabel(r.importance_level)) },
+        { key: "status", title: "状态", render: (r) => htmlEscape(toAlertStatusLabel(r.status)) },
         { key: "created_at", title: "创建时间", render: (r) => htmlEscape(String(r.created_at || "").replace("T", " ").slice(0, 19)) },
         {
           key: "actions",
           title: "操作",
           render: (r) =>
-            `<button data-action="ack" data-alert-id="${htmlEscape(r.alert_id)}">ACK</button>
+            `<button data-action="ack" data-alert-id="${htmlEscape(r.alert_id)}">确认</button>
              ${canRevoke ? `<button data-action="revoke" data-alert-id="${htmlEscape(r.alert_id)}">撤销</button>` : ""}
              <button data-action="detail" data-alert-id="${htmlEscape(r.alert_id)}">详情</button>`,
         },
@@ -293,22 +462,25 @@
 
   function renderSourcesPage() {
     const pageData = pageSlice("sources", state.caches.sources);
+    const canCollectNow = state.user && state.user.role === "admin";
     renderTable(
       "sourcesTable",
       [
-        { key: "source_id", title: "source_id" },
-        { key: "display_name", title: "名称", render: (r) => htmlEscape(r.display_name || "-") },
-        { key: "tier", title: "tier" },
-        { key: "region", title: "region" },
-        { key: "enabled", title: "enabled" },
-        { key: "source_weight", title: "source_weight" },
-        { key: "effective_source_weight", title: "effective_weight" },
+        { key: "source_id", title: "来源ID" },
+        { key: "display_name", title: "来源名称", render: (r) => htmlEscape(r.display_name || "-") },
+        { key: "tier", title: "分层" },
+        { key: "region", title: "地区" },
+        { key: "category", title: "类别" },
+        { key: "enabled", title: "启用", render: (r) => htmlEscape(yesNo(Boolean(r.enabled))) },
+        { key: "source_weight", title: "来源权重" },
+        { key: "effective_source_weight", title: "有效权重" },
         {
           key: "ops",
           title: "操作",
           render: (r) =>
             `<button data-action="versions" data-source-id="${htmlEscape(r.source_id)}">版本</button>
-             <button data-action="compliance" data-source-id="${htmlEscape(r.source_id)}">合规</button>`,
+             <button data-action="compliance" data-source-id="${htmlEscape(r.source_id)}">合规</button>
+             ${canCollectNow ? `<button data-action="collect-now" data-source-id="${htmlEscape(r.source_id)}">立即采集</button>` : ""}`,
         },
       ],
       pageData.rows
@@ -322,8 +494,8 @@
       "manualTable",
       [
         { key: "manual_message_id", title: "消息ID" },
-        { key: "status", title: "状态" },
-        { key: "importance_level", title: "级别" },
+        { key: "status", title: "状态", render: (r) => htmlEscape(toManualStatusLabel(r.status)) },
+        { key: "importance_level", title: "级别", render: (r) => htmlEscape(toLevelLabel(r.importance_level)) },
         { key: "importance_score", title: "分数" },
         { key: "updated_at", title: "更新时间", render: (r) => htmlEscape(String(r.updated_at || "").replace("T", " ").slice(0, 19)) },
         {
@@ -412,8 +584,8 @@
       (row) =>
         `<div class="list-item">
           <div class="item-title">${htmlEscape(row.title)}</div>
-          <div class="item-meta">${htmlEscape(row.importance_level)} | ${htmlEscape(row.importance_score)} | ${htmlEscape(
-            (row.impacted_markets || []).join(",")
+          <div class="item-meta">${htmlEscape(toLevelLabel(row.importance_level))} | ${htmlEscape(row.importance_score)} | ${htmlEscape(
+            (row.impacted_markets || []).map((item) => toMarketLabel(item)).join(" / ")
           )}</div>
         </div>`
     );
@@ -423,17 +595,14 @@
 
   async function loadEvents() {
     setLoading("eventsTable", true);
-    const market = $("eventsFilterMarket").value.trim();
     const score = Number($("eventsFilterScore").value || "0");
-    const keyword = $("eventsFilterKeyword").value.trim().toLowerCase();
-    const query = new URLSearchParams({ page: "1", page_size: "240" });
-    if (market) query.set("market", market);
+    const query = new URLSearchParams({ page: "1", page_size: "500" });
     if (Number.isFinite(score) && score > 0) query.set("importance_min", String(score));
     try {
       const payload = await api(`/api/v1/events/feed?${query.toString()}`);
-      const rows = (payload.events || []).filter((row) => (keyword ? String(row.title || "").toLowerCase().includes(keyword) : true));
+      const rows = payload.events || [];
       state.caches.events = rows;
-      state.filteredEvents = rows;
+      state.filteredEvents = rows.filter((row) => matchesEventFilter(row));
       state.liveEventIds = new Set(rows.map((row) => row.event_id));
       state.pagination.events.page = 1;
       renderEventsPage();
@@ -466,9 +635,24 @@
       state.caches.sources = payload.sources || [];
       state.pagination.sources.page = 1;
       renderSourcesPage();
+      refreshCollectorSourceOptions();
     } finally {
       setLoading("sourcesTable", false);
     }
+  }
+
+  function refreshCollectorSourceOptions() {
+    const select = $("collectorSourceIds");
+    if (!(select instanceof HTMLSelectElement)) return;
+    const selected = new Set(Array.from(select.selectedOptions).map((opt) => opt.value));
+    select.innerHTML = state.caches.sources
+      .map((row) => {
+        const sid = String(row.source_id || "");
+        const name = String(row.display_name || "");
+        const marker = selected.has(sid) ? "selected" : "";
+        return `<option value="${htmlEscape(sid)}" ${marker}>${htmlEscape(sid)}${name ? ` | ${htmlEscape(name)}` : ""}</option>`;
+      })
+      .join("");
   }
 
   async function loadManualMessages() {
@@ -494,6 +678,12 @@
     $("prefInstruments").value = (profile.preferences?.focus_instruments || []).join(",");
     $("prefAlertLevel").value = profile.preferences?.alert_level_min || "P2";
     $("profileResult").textContent = JSON.stringify(profile, null, 2);
+    if ($("manualOperatorId")) {
+      $("manualOperatorId").value = profile.username || "";
+    }
+    if ($("manualOperatorRole")) {
+      $("manualOperatorRole").value = profile.role || "analyst";
+    }
 
     if (state.user.role === "admin") {
       const users = await api("/api/v1/admin/users");
@@ -508,7 +698,7 @@
 
   async function loadAdminPanel() {
     if (!state.user || state.user.role !== "admin") {
-      $("adminInfo").textContent = "仅管理员可访问。";
+      $("collectorRunResult").textContent = "仅管理员可访问。";
       $("auditTable").innerHTML = "<div class='list-item'>仅管理员可访问。</div>";
       $("auditPagination").innerHTML = "";
       return;
@@ -520,14 +710,23 @@
       api("/api/v1/collector/tasks/stats"),
       api("/api/v1/audit/logs?limit=200"),
     ]);
-    $("adminInfo").textContent = JSON.stringify(
-      { metrics, model_inference: modelStatus, notifications: notifyStatus, collector_queue: queueStats },
-      null,
-      2
-    );
+    $("adminModelBackend").textContent = modelStatus.backend || "-";
+    $("adminCollectorBackend").textContent = queueStats.backend || "-";
+    $("adminCollectorQueueSize").textContent = String(queueStats.queue_size ?? 0);
+    $("adminNotificationsQueued").textContent = String(metrics.notifications_queued ?? 0);
+    const failed = Math.max(0, Number(metrics.notifications_total || 0) - Number(metrics.notifications_delivered || 0) - Number(metrics.notifications_queued || 0));
+    $("adminNotificationsFailed").textContent = String(failed);
+    $("adminAuditTotal").textContent = String(metrics.audit_total ?? 0);
+    $("collectorRunResult").textContent = [
+      `通知后端: ${notifyStatus.backend || "-"}`,
+      `分发器: ${notifyStatus.dispatcher || "-"}`,
+      `IM Webhook: ${notifyStatus.im_webhook_configured ? "已配置" : "未配置"}`,
+      `采集任务队列: ${queueStats.backend || "-"} / 当前堆积 ${queueStats.queue_size ?? 0}`,
+    ].join("\n");
     state.caches.auditLogs = auditLogs.logs || [];
     state.pagination.audit.page = 1;
     renderAuditPage();
+    refreshCollectorSourceOptions();
   }
 
   function runGlobalSearch() {
@@ -539,8 +738,9 @@
     }
     const rows = [];
     for (const event of state.caches.events) {
-      if (String(event.title || "").toLowerCase().includes(keyword)) {
-        rows.push({ type: "event", label: event.title, id: event.event_id });
+      const text = `${event.title || ""} ${event.content || ""} ${(event.impacted_instruments || []).join(" ")}`.toLowerCase();
+      if (text.includes(keyword)) {
+        rows.push({ type: "event", label: event.title, id: event.event_id, extra: (event.impacted_instruments || []).join(",") });
       }
     }
     for (const alert of state.caches.alerts) {
@@ -561,7 +761,7 @@
       (row) =>
         `<div class="list-item">
           <div class="item-title">[${htmlEscape(row.type)}] ${htmlEscape(row.label)}</div>
-          <div class="item-meta">${htmlEscape(row.id)}</div>
+          <div class="item-meta">${htmlEscape(row.id)} ${row.extra ? `| ${htmlEscape(row.extra)}` : ""}</div>
         </div>`
     );
   }
@@ -702,7 +902,7 @@
       }
     }
     await Promise.all([loadAlerts(), loadDashboard()]);
-    toast(`批量ACK完成: success=${success}, failed=${failed}`, failed > 0 ? "warn" : "info");
+    toast(`批量确认完成: 成功=${success}, 失败=${failed}`, failed > 0 ? "warn" : "info");
   }
 
   async function bulkRevokeSelected() {
@@ -853,7 +1053,7 @@
       try {
         if (action === "ack") {
           await api(`/api/v1/alerts/${alertId}/ack`, { method: "POST", body: { note: "ui_ack" } });
-          toast(`告警 ${alertId} 已 ACK`);
+          toast(`告警 ${alertId} 已确认`);
           await loadAlerts();
         } else if (action === "revoke") {
           await api(`/api/v1/alerts/${alertId}/revoke?reason=ui_revoke`, { method: "POST" });
@@ -891,6 +1091,13 @@
         } else if (action === "compliance") {
           const payload = await api(`/api/v1/sources/${encodeURIComponent(sourceId)}/compliance`);
           openDrawer(`来源合规 ${sourceId}`, payload);
+        } else if (action === "collect-now") {
+          const result = await api(`/api/v1/collector/run-once?source_ids=${encodeURIComponent(sourceId)}&limit=1&retries=1`, {
+            method: "POST",
+          });
+          $("collectorRunResult").textContent = `来源 ${sourceId} 采集完成\n拉取成功来源: ${result.sources_pulled}\n新增事件: ${result.accepted}\n去重: ${result.deduplicated}\n失败: ${result.failed}`;
+          toast(`来源 ${sourceId} 已触发采集`);
+          await Promise.all([loadEvents(), loadDashboard(), loadAdminPanel()]);
         }
       } catch (err) {
         toast(`来源操作失败: ${err.message}`, "error");
@@ -1025,6 +1232,39 @@
         await loadAdminPanel();
       } catch (err) {
         toast(`采集任务处理失败: ${err.message}`, "error");
+      }
+    });
+    $("collectorRunForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const sourceSelect = $("collectorSourceIds");
+      if (!(sourceSelect instanceof HTMLSelectElement)) return;
+      const selectedIds = Array.from(sourceSelect.selectedOptions)
+        .map((opt) => opt.value.trim())
+        .filter(Boolean);
+      const limit = Number($("collectorLimitInput").value || "20");
+      const retries = Number($("collectorRetriesInput").value || "2");
+      try {
+        const qs = new URLSearchParams({
+          limit: String(Math.max(1, Math.min(200, limit))),
+          retries: String(Math.max(0, Math.min(5, retries))),
+        });
+        if (selectedIds.length > 0) {
+          qs.set("source_ids", selectedIds.join(","));
+        }
+        const result = await api(`/api/v1/collector/run-once?${qs.toString()}`, { method: "POST" });
+        $("collectorRunResult").textContent = [
+          `采集完成时间: ${String(result.ran_at || "").replace("T", " ").slice(0, 19)}`,
+          `请求来源: ${(result.requested_sources || []).join(",") || "全部已启用来源"}`,
+          `纳入采集来源数: ${result.sources_total}`,
+          `抓取成功来源: ${result.sources_pulled}`,
+          `新增事件: ${result.accepted}`,
+          `重复去重: ${result.deduplicated}`,
+          `失败来源: ${result.failed}`,
+        ].join("\n");
+        toast("手动采集执行完成");
+        await Promise.all([loadEvents(), loadAlerts(), loadDashboard(), loadAdminPanel()]);
+      } catch (err) {
+        toast(`手动采集失败: ${err.message}`, "error");
       }
     });
     $("auditTable").addEventListener("click", (event) => {

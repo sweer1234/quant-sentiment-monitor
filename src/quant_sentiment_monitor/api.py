@@ -280,9 +280,11 @@ def batch_ingest_events(
 def collector_run_once(
     limit: int = Query(default=20, ge=1, le=200),
     retries: int = Query(default=2, ge=0, le=5),
+    source_ids: str | None = Query(default=None, description="comma separated source ids"),
     _: str = Depends(require_permission("admin.state")),
 ) -> dict[str, Any]:
-    return run_collection_once(store=store, limit=limit, retries=retries)
+    selected = [item.strip() for item in (source_ids or "").split(",") if item.strip()]
+    return run_collection_once(store=store, limit=limit, retries=retries, source_ids=selected)
 
 
 @app.post("/api/v1/collector/tasks/enqueue")
@@ -293,11 +295,18 @@ def enqueue_collector_task(
     body = payload or {}
     limit = int(body.get("limit", 20))
     retries = int(body.get("retries", 2))
+    source_ids = body.get("source_ids", [])
+    if isinstance(source_ids, str):
+        source_ids = [item.strip() for item in source_ids.split(",") if item.strip()]
+    if not isinstance(source_ids, list):
+        source_ids = []
+    source_ids = [str(item).strip() for item in source_ids if str(item).strip()]
     task_id = collector_task_queue.enqueue(
         {
             "kind": "collector.run_once",
             "limit": max(1, min(limit, 200)),
             "retries": max(0, min(retries, 5)),
+            "source_ids": source_ids,
             "actor": actor,
             "enqueued_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -329,7 +338,8 @@ def process_collector_tasks(
             continue
         limit = int(task.get("limit", 20))
         retries = int(task.get("retries", 2))
-        run_result = run_collection_once(store=store, limit=limit, retries=retries)
+        source_ids = task.get("source_ids") if isinstance(task.get("source_ids"), list) else []
+        run_result = run_collection_once(store=store, limit=limit, retries=retries, source_ids=source_ids)
         results.append({"task_id": task.get("task_id"), "ok": True, "result": run_result})
     store._audit(
         "collector.task.process",
@@ -367,9 +377,13 @@ def get_events_feed(
                 "importance_level": event.importance_level,
                 "importance_score": event.importance_score,
                 "impacted_markets": event.impacted_markets,
+                "impacted_instruments": [item.instrument for item in event.impacts],
                 "top_impacted_instruments": [item.instrument for item in event.impacts[:3]],
                 "net_bias_score": round(sum(item.net_bias_score for item in event.impacts) / len(event.impacts), 2),
                 "detected_at": event.detected_at,
+                "content": event.content,
+                "event_type": event.event_type,
+                "source_id": event.source_id,
             }
         )
     return EventFeedResponse(page=page, page_size=page_size, total=total, events=cards)

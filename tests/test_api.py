@@ -172,6 +172,12 @@ def test_collector_task_queue_endpoints() -> None:
             None,
         ),
     ):
+        run_once_selected = client.post(
+            "/api/v1/collector/run-once?limit=5&source_ids=federal_reserve",
+            headers=admin_headers,
+        )
+        assert run_once_selected.status_code == 200
+        assert "federal_reserve" in run_once_selected.json()["requested_sources"]
         processed = client.post("/api/v1/collector/tasks/process?max_tasks=5", headers=admin_headers)
     assert processed.status_code == 200
     assert processed.json()["processed"] >= 1
@@ -209,6 +215,8 @@ def test_event_feed_and_impact() -> None:
     assert feed.status_code == 200
     payload = feed.json()
     assert payload["total"] >= 1
+    assert "content" in payload["events"][0]
+    assert "impacted_instruments" in payload["events"][0]
     event_id = payload["events"][0]["event_id"]
 
     impact = client.get(f"/api/v1/events/{event_id}/impact")
